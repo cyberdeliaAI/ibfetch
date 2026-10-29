@@ -1,0 +1,3 @@
+# Build-only; normal browser/CLI execution remains standard-library-only.
+PyInstaller==6.22.3
+Pillow==12.0.0
