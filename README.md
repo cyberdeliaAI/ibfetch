@@ -40,6 +40,16 @@ uploaded. The note is kept in the hidden manifest, including after a failed move
 the work folder, a retry or verification. Names and folders always use your current iBroadcast library data. The hidden
 JSON manifest records download identity and integrity; it never writes tags or artwork.
 
+## Screenshots
+
+**Forest palette:** browse albums by artist while downloading original-quality files.
+
+![ibfetch in the Forest palette, showing 10cc albums and an active download](docs/screenshots/ibfetch-forest-download.png)
+
+**Amber · Original palette:** filter the library by tag and follow download progress.
+
+![ibfetch in the Amber palette, showing tag-filtered albums and download progress](docs/screenshots/ibfetch-amber-tags.png)
+
 ## Install
 
 ### Download an app
