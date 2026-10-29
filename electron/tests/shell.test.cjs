@@ -24,9 +24,16 @@ test("only the matching private loopback readiness message is accepted", () => {
   assert.throws(() => readyMessage({...value, version:"other"}, info.version));
 });
 
-test("external links are restricted to credential-free HTTPS iBroadcast approval", () => {
+test("external links are restricted to HTTPS approval, branding and fixed ibfetch pages", () => {
   assert.ok(externalUrl("https://oauth.ibroadcast.com/device?code=test"));
   for (const value of ["javascript:alert(1)", "file:///tmp/a", "https://example.com/", "https://name:secret@oauth.ibroadcast.com/device", "http://oauth.ibroadcast.com/device"])
+    assert.equal(externalUrl(value), null);
+  for (const value of ["https://www.ibroadcast.com/", "https://github.com/cyberdeliaAI/ibfetch/releases/latest",
+    "https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.5.0", "https://github.com/cyberdeliaAI/ibfetch/blob/main/LICENSE"])
+    assert.equal(externalUrl(value), value);
+  for (const value of ["https://oauth.ibroadcast.com/device-evil", "https://github.com/evil/ibfetch/releases/latest",
+    "https://github.com/cyberdeliaAI/ibfetch/releases/latest?redirect=evil", "https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.5.0/extra",
+    "https://www.ibroadcast.com:444/", "https://www.ibroadcast.com/other", "https://github.com/cyberdeliaAI/ibfetch/settings"])
     assert.equal(externalUrl(value), null);
 });
 
@@ -52,6 +59,7 @@ test("the shell has no Node bridge, webviews or disabled web security", () => {
 test("a real source backend starts with a temporary home and exits on parent EOF", async () => {
   const os=require("node:os");
   const home=fs.mkdtempSync(path.join(os.tmpdir(),"ibfetch-host-test-"));
+  fs.writeFileSync(path.join(home,"app-settings.json"),JSON.stringify({auto_updates:false}));
   const sourceRoot=path.resolve(__dirname,"../..");
   const backend=new Backend(backendCommand({packaged:false,sourceRoot,python:process.env.IBFETCH_PYTHON}),
     {version:info.version,cwd:sourceRoot,env:{...process.env,IBFETCH_HOME:home},timeout:90000});
@@ -71,6 +79,7 @@ test("a real source backend starts with a temporary home and exits on parent EOF
 test("closing terminates only its owned backend when a worker is stuck in a socket read", async () => {
   const os=require("node:os");
   const home=fs.mkdtempSync(path.join(os.tmpdir(),"ibfetch-stuck-host-"));
+  fs.writeFileSync(path.join(home,"app-settings.json"),JSON.stringify({auto_updates:false}));
   const sourceRoot=path.resolve(__dirname,"../..");
   const python=backendCommand({packaged:false,sourceRoot,python:process.env.IBFETCH_PYTHON}).file;
   // A genuine Python executor worker blocks process exit after parent EOF, just

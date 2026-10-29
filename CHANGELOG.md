@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Add the official, unmodified Powered by iBroadcast logos and clear independent-app attribution.
+- Add an ibfetch README header with its icon, Tests badge and MIT license badge.
+- Use an original music-note/download-tray logo for the app, native icons and README.
+- Check for stable GitHub releases in the background, at most once daily, with a header
+  notification, manual check and saved opt-out. Downloads and installation remain manual.
+- Keep update requests anonymous and bounded, without account data or redirects.
+
 ## 1.3.1
 
 - Bundle Mozilla trusted CA certificates in desktop builds so HTTPS and sign-in work

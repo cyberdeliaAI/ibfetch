@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">ibfetch — music downloads</title>
+  <rect x="24" y="24" width="976" height="976" rx="218" fill="#1e3027"/>
+  <rect x="28" y="28" width="968" height="968" rx="214" fill="none" stroke="#46664e" stroke-width="8"/>
+  <path d="M428 276 628 232V330L428 376Z" fill="#d2e59e"/>
+  <path d="M428 304V570" fill="none" stroke="#d2e59e" stroke-width="66" stroke-linecap="round"/>
+  <ellipse cx="352" cy="578" rx="106" ry="78" transform="rotate(-18 352 578)" fill="#d2e59e"/>
+  <path d="M676 414V632M600 562 676 638 752 562" fill="none" stroke="#91cbaf" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M230 722V770Q230 810 270 810H754Q794 810 794 770V722" fill="none" stroke="#91cbaf" stroke-width="50" stroke-linecap="round"/>
+</svg>

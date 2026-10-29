@@ -24,6 +24,10 @@ The Mac location is ibfetch.app/Contents/Resources; Windows/Linux use resources
 inside the extracted app directory. Electron and Python are not part of the
 standalone Python source ZIP; that version uses your installed interpreter.
 
+The Powered by iBroadcast SVGs are unchanged official branding assets. iBroadcast's
+name and marks belong to iBroadcast and are not relicensed under ibfetch's MIT license;
+see [branding asset notes](../assets/README.md).
+
 Upstream sources: [Python](https://github.com/python/cpython/blob/3.13/LICENSE),
 [PyInstaller](https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt),
 [Electron](https://github.com/electron/electron/blob/v44.9.0/LICENSE),

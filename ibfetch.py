@@ -17,6 +17,7 @@ import errno
 import gzip
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -43,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -255,6 +256,110 @@ def connection_error(error, service="iBroadcast"):
         return (f"Could not verify {service}'s HTTPS certificate. Update the desktop app, "
                 "or check your Python installation's trusted certificates.")
     return f"Could not reach {service} ({error.__class__.__name__})."
+
+
+RELEASES_URL = "https://github.com/cyberdeliaAI/ibfetch/releases"
+UPDATE_API = "https://api.github.com/repos/cyberdeliaAI/ibfetch/releases/latest"
+UPDATE_INTERVAL = 24 * 60 * 60
+
+
+def stable_version(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}", value):
+        raise ValueError("Not a stable version")
+    return tuple(int(part) for part in value.split("."))
+
+
+def release_info(data):
+    if not isinstance(data, dict) or data.get("draft") or data.get("prerelease"):
+        raise ValueError("Not a stable release")
+    tag = data.get("tag_name")
+    if not isinstance(tag, str) or not tag.startswith("v"):
+        raise ValueError("Unsupported release tag")
+    stable_version(tag[1:])
+    return {"version": tag[1:]}
+
+
+class NoUpdateRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def latest_release():
+    # A separate, anonymous client: no account session, proxies, cookies or redirects.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoUpdateRedirect())
+    request = urllib.request.Request(UPDATE_API, headers={"User-Agent": USER_AGENT,
+                                    "Accept": "application/vnd.github+json"})
+    with opener.open(request, timeout=8) as response:
+        if status_of(response) != 200:
+            raise ValueError("Release check failed")
+        raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("Release response too large")
+    return release_info(json.loads(raw))
+
+
+class UpdateChecker:
+    """Background notifications only; attempts, including failures, are limited daily."""
+
+    def __init__(self, home, automatic=True):
+        self.path = home / "updates.json"
+        self.lock = threading.RLock()
+        self.automatic, self.checking, self.closed = automatic, False, False
+        self.cache = {}
+        saved = read_object(self.path)
+        for key in ("attempted_at", "checked_at"):
+            value = saved.get(key)
+            if type(value) in (int, float) and 0 <= value <= time.time() and math.isfinite(value):
+                self.cache[key] = value
+        try:
+            self.cache["latest"] = release_info({"tag_name": "v" + saved["latest"]["version"]})
+        except (KeyError, TypeError, ValueError):
+            pass
+        if saved.get("error"):
+            self.cache["error"] = True
+
+    def snapshot(self):
+        with self.lock:
+            latest = self.cache.get("latest", {}).get("version")
+            available = bool(latest and stable_version(latest) > stable_version(VERSION))
+            return {"current": VERSION, "latest": latest, "available": available,
+                    "url": RELEASES_URL + "/tag/v" + latest if available else RELEASES_URL + "/latest",
+                    "checking": self.checking, "automatic": self.automatic,
+                    "checked_at": self.cache.get("checked_at"), "error": bool(self.cache.get("error"))}
+
+    def _persist(self):
+        try:
+            write_private(self.path, json.dumps(self.cache).encode())
+        except OSError:
+            pass  # A read-only home must not prevent downloading or checking in memory.
+
+    def check(self, manual=False):
+        with self.lock:
+            attempted = self.cache.get("attempted_at")
+            if (self.closed or self.checking or not manual and (not self.automatic or
+                    attempted is not None and 0 <= time.time() - attempted < UPDATE_INTERVAL)):
+                return self.snapshot()
+            self.checking = True
+            self.cache["attempted_at"] = time.time()
+            threading.Thread(target=self._run, daemon=True).start()
+            return self.snapshot()
+
+    def _run(self):
+        with self.lock:
+            self._persist()
+        try:
+            latest = latest_release()
+            error = False
+        except (OSError, ValueError, HTTPException):
+            latest, error = None, True
+        with self.lock:
+            self.checking = False
+            if self.closed:
+                return
+            if latest:
+                self.cache.update(latest=latest, checked_at=time.time())
+            self.cache["error"] = error
+            self._persist()
 
 
 def textual(response):
@@ -2003,7 +2108,8 @@ class App:
         self.last_items = []
         self.last_options = {}
         self.settings = {"out": str(Path.home() / "Music" / "iBroadcast"), "quality": "orig", "source": "download",
-                         "jobs": 3, "layout": DEFAULT_LAYOUT, "work": "", "appearance": "auto", "palette": "forest"}
+                         "jobs": 3, "layout": DEFAULT_LAYOUT, "work": "", "appearance": "auto", "palette": "forest",
+                         "auto_updates": True}
         saved = read_object(home / "app-settings.json")
         for key in ("out", "layout"):
             if isinstance(saved.get(key), str) and saved[key].strip():
@@ -2020,6 +2126,10 @@ class App:
             self.settings["appearance"] = saved["appearance"]
         if saved.get("palette") in ("forest", "ocean", "warm", "ibroadcast", "amber"):
             self.settings["palette"] = saved["palette"]
+        if type(saved.get("auto_updates")) is bool:
+            self.settings["auto_updates"] = saved["auto_updates"]
+        self.updates = UpdateChecker(home, self.settings["auto_updates"])
+        self.updates_started = False
         try:
             self.session = Session(home)
         except Fail:
@@ -2028,6 +2138,24 @@ class App:
             self.load_library()
 
     # local appearance
+    def start_updates(self):
+        self.updates_started = True
+        self.updates.check()
+
+    def set_updates(self, body):
+        enabled = body.get("automatic")
+        if type(enabled) is not bool:
+            raise Fail("Choose whether to check automatically.")
+        with self.lock:
+            settings = {**self.settings, "auto_updates": enabled}
+            write_private(self.home / "app-settings.json", json.dumps(settings, indent=2).encode())
+            self.settings = settings
+            with self.updates.lock:
+                self.updates.automatic = enabled
+        if self.updates_started:
+            self.updates.check()
+        return self.updates.snapshot()
+
     def set_appearance(self, body):
         appearance, palette = body.get("appearance"), body.get("palette")
         if appearance not in ("auto", "light", "dark") or palette not in ("forest", "ocean", "warm", "ibroadcast", "amber"):
@@ -2250,6 +2378,8 @@ class App:
             self.transfer.cancel()
 
     def state(self):
+        if self.updates_started:
+            self.updates.check()
         with self.lock:
             lib, login, transfer = self.lib, self.login, self.transfer
             info = {"signed_in": bool(self.session), "login": login,
@@ -2260,9 +2390,12 @@ class App:
         info["user"] = {"name": lib.username, "premium": lib.premium} if lib else None
         info["transfer"] = transfer.snapshot() if transfer else None
         info["can_retry"] = bool(self.last_items)
+        info["updates"] = self.updates.snapshot()
         return info
 
     def shutdown(self):
+        with self.updates.lock:
+            self.updates.closed = True
         with self.lock:
             self.closed = True
             self.library_generation += 1
@@ -2285,7 +2418,11 @@ class LocalHTTPServer(ThreadingHTTPServer):
 
 
 def make_handler(app, token):
-    page = PAGE.replace("__TOKEN__", token).encode()
+    page = PAGE.replace("__TOKEN__", token).replace("__VERSION__", VERSION)
+    page = page.replace("__IBFETCH_ICON__", "data:image/svg+xml;base64," + IBFETCH_ICON)
+    for kind, encoded in POWERED_LOGOS.items():
+        page = page.replace("__POWERED_" + kind.upper() + "__", "data:image/svg+xml;base64," + encoded)
+    page = page.encode()
     script_policy = " ".join("'sha256-" + base64.b64encode(hashlib.sha256(script).digest()).decode() + "'"
                              for script in re.findall(rb"<script>(.*?)</script>", page, re.S))
     cookie_name = "ibfetch"
@@ -2374,6 +2511,10 @@ def make_handler(app, token):
             self.send(200, result)
 
         def route(self, path, body):
+            if path == "/api/updates/check":
+                return app.updates.check(manual=True)
+            if path == "/api/updates/settings":
+                return app.set_updates(body)
             if path == "/api/appearance":
                 return app.set_appearance(body)
             if path == "/api/login":
@@ -2430,6 +2571,7 @@ def cmd_gui(args, home):
         server = LocalHTTPServer(("127.0.0.1", 0), handler)  # that port is taken: use any free one
     handler.port = server.server_address[1]
     server.daemon_threads = True
+    app.start_updates()
     url = f"http://127.0.0.1:{handler.port}/?t={token}"
     print(f"ibfetch is running at\n  {url}\n\nKeep this window open while you use it. Press Ctrl+C to quit.",
           flush=True)
@@ -2454,6 +2596,7 @@ def cmd_desktop(home):
     server = LocalHTTPServer(("127.0.0.1", 0), handler)
     handler.port = server.server_address[1]
     server.daemon_threads = True
+    app.start_updates()
     serving = threading.Event()
 
     def parent_input():
@@ -2571,6 +2714,10 @@ def main(argv=None):
         return 0
 
 
+
+IBFETCH_ICON = 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDI0IDEwMjQiIHJvbGU9ImltZyIgYXJpYS1sYWJlbGxlZGJ5PSJ0aXRsZSI+CiAgPHRpdGxlIGlkPSJ0aXRsZSI+aWJmZXRjaCDigJQgbXVzaWMgZG93bmxvYWRzPC90aXRsZT4KICA8cmVjdCB4PSIyNCIgeT0iMjQiIHdpZHRoPSI5NzYiIGhlaWdodD0iOTc2IiByeD0iMjE4IiBmaWxsPSIjMWUzMDI3Ii8+CiAgPHJlY3QgeD0iMjgiIHk9IjI4IiB3aWR0aD0iOTY4IiBoZWlnaHQ9Ijk2OCIgcng9IjIxNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNDY2NjRlIiBzdHJva2Utd2lkdGg9IjgiLz4KICA8cGF0aCBkPSJNNDI4IDI3NiA2MjggMjMyVjMzMEw0MjggMzc2WiIgZmlsbD0iI2QyZTU5ZSIvPgogIDxwYXRoIGQ9Ik00MjggMzA0VjU3MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZDJlNTllIiBzdHJva2Utd2lkdGg9IjY2IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8ZWxsaXBzZSBjeD0iMzUyIiBjeT0iNTc4IiByeD0iMTA2IiByeT0iNzgiIHRyYW5zZm9ybT0icm90YXRlKC0xOCAzNTIgNTc4KSIgZmlsbD0iI2QyZTU5ZSIvPgogIDxwYXRoIGQ9Ik02NzYgNDE0VjYzMk02MDAgNTYyIDY3NiA2MzggNzUyIDU2MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTFjYmFmIiBzdHJva2Utd2lkdGg9IjYyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICA8cGF0aCBkPSJNMjMwIDcyMlY3NzBRMjMwIDgxMCAyNzAgODEwSDc1NFE3OTQgODEwIDc5NCA3NzBWNzIyIiBmaWxsPSJub25lIiBzdHJva2U9IiM5MWNiYWYiIHN0cm9rZS13aWR0aD0iNTAiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K'
+
+POWERED_LOGOS = {'light': 'PHN2ZyB4bWw6c3BhY2U9InByZXNlcnZlIiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAzMzguNyA3OS41OyIgdmlld0JveD0iMCAwIDMzOC43IDc5LjUiIHk9IjBweCIgeD0iMHB4IiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2ZXJzaW9uPSIxLjEiPgo8c3R5bGUgdHlwZT0idGV4dC9jc3MiPgoJLnN0MHtkaXNwbGF5Om5vbmU7fQoJLnN0MXtkaXNwbGF5OmlubGluZTt9Cgkuc3Qye2ZpbGw6I0RDRERERTt9Cgkuc3Qze2ZpbGw6IzkzOTU5ODt9Cgkuc3Q0e2ZpbGw6IzU4NTk1Qjt9Cgkuc3Q1e2ZpbGw6IzhDOTM5ODt9Cgkuc3Q2e2ZpbGw6IzI4MjgyOTt9Cgkuc3Q3e2ZpbGw6IzZENkU3MTt9Cgkuc3Q4e2ZpbGw6I0E3QTlBQzt9Cgkuc3Q5e2ZpbGw6IzQxNDA0Mjt9Cjwvc3R5bGU+CjxnIGNsYXNzPSJzdDAiIGlkPSJMYXllcl8xIj4KCTxnIGNsYXNzPSJzdDEiPgoJCTxnPgoJCQk8cmVjdCBoZWlnaHQ9IjIzLjIiIHdpZHRoPSI5LjMiIGNsYXNzPSJzdDIiIHk9IjMyLjQiIHg9IjAuNiI+PC9yZWN0PgoJCTwvZz4KCTwvZz4KCTxnIGNsYXNzPSJzdDEiPgoJCTxnPgoJCQk8cGF0aCBkPSJNMTQ3LjcsMjcuOGMtMS4yLTEuOS00LjEtNC40LTkuMi00LjRjLTguMywwLTE1LjYsNi40LTE1LjYsMTYuNmMwLDguOSw1LjgsMTYuNiwxNS42LDE2LjYKCQkJCWMzLjYsMCw3LjUtMS40LDkuMi00LjR2My40aDkuM1YyNC41aC05LjNWMjcuOHogTTE0Ny43LDQwLjVjLTAuMSwxLjQtMC41LDIuNy0xLjMsNGMtMS4yLDEuOS0zLjIsMy41LTYuNSwzLjUKCQkJCWMtNS42LDAtNy43LTQuOS03LjctNy44di0wLjFjMC0zLjUsMi40LTgsNy43LThjMy45LDAsNi4xLDIuMiw3LjEsNC4zQzE0Ny41LDM3LjcsMTQ3LjgsMzkuMSwxNDcuNyw0MC41eiIgY2xhc3M9InN0MiI+PC9wYXRoPgoJCTwvZz4KCTwvZz4KCTxnIGNsYXNzPSJzdDEiPgoJCTxnPgoJCQk8cGF0aCBkPSJNMTg5LjMsMjMuOHYzLjRjLTEtMS0zLjYtMy43LTkuMS0zLjdjLTcuOSwwLTE1LjQsNi0xNS40LDE2LjVjMCw5LjQsNi4yLDE2LjYsMTUuNiwxNi42CgkJCQljNi4zLDAsOC41LTMuMSw5LjQtNC40djMuNGg4LjhWMTQuMWgtOS4zVjIzLjh6IE0xODcuNiw0NS42Yy0xLjUsMS41LTMuNSwyLjQtNS44LDIuNGMtNC40LDAtNy44LTMuMi03LjgtOHYtMC4xCgkJCQljMC0zLjYsMi41LTcuOCw3LjktNy44YzIuMiwwLDQuMiwwLjgsNS42LDIuMmMxLjQsMS4zLDIuMywzLjMsMi4zLDUuNUMxODkuOSw0Mi4xLDE4OS4xLDQ0LjEsMTg3LjYsNDUuNnoiIGNsYXNzPSJzdDIiPjwvcGF0aD4KCQk8L2c+Cgk8L2c+Cgk8ZyBjbGFzcz0ic3QxIj4KCQk8Zz4KCQkJPHBhdGggZD0iTTIyMi41LDQ3LjljLTQuNCwwLTcuNC0zLjQtNy40LTcuOWMwLTIuMiwwLjctNC4zLDItNS43YzEuNC0xLjUsMy4yLTIuMyw1LjQtMi4yYzMuOSwwLDUuNywyLjIsNi43LDQuNGg5LjQKCQkJCWMtMS42LTcuNi04LjItMTMuMS0xNi41LTEzLjFjLTkuMywwLTE2LjQsNy40LTE2LjQsMTYuNWMwLDkuMiw3LjIsMTYuNiwxNi42LDE2LjZjOC40LDAsMTQuNi01LjgsMTYuMy0xMi44aC05LjUKCQkJCUMyMjguMiw0NS43LDIyNi4zLDQ3LjksMjIyLjUsNDcuOXoiIGNsYXNzPSJzdDIiPjwvcGF0aD4KCQk8L2c+Cgk8L2c+Cgk8ZyBjbGFzcz0ic3QxIj4KCQk8Zz4KCQkJPHBhdGggZD0iTTI3MC43LDI3LjhjLTEuMi0xLjktNC4xLTQuNC05LjItNC40Yy04LjMsMC0xNS42LDYuNC0xNS42LDE2LjZjMCw4LjksNS44LDE2LjYsMTUuNiwxNi42CgkJCQljMy42LDAsNy41LTEuNCw5LjItNC40djMuNGg5LjNWMjQuNWgtOS4zVjI3Ljh6IE0yNzAuNyw0MC41Yy0wLjEsMS40LTAuNSwyLjctMS4zLDRjLTEuMiwxLjktMy4yLDMuNS02LjUsMy41CgkJCQljLTUuNiwwLTcuNy00LjktNy43LTcuOHYtMC4xYzAtMy41LDIuMy04LDcuNy04YzMuOSwwLDYsMi4yLDcuMSw0LjNDMjcwLjUsMzcuNywyNzAuOCwzOS4xLDI3MC43LDQwLjV6IiBjbGFzcz0ic3QyIj48L3BhdGg+CgkJPC9nPgoJPC9nPgoJPGcgY2xhc3M9InN0MSI+CgkJPGc+CgkJCTxwYXRoIGQ9Ik0zMDIuOCwzNmMtMi41LTAuNy00LjgtMS43LTQuOC0zLjFjMC0wLjksMC43LTIuMSwyLjYtMi4xYzIuNywwLDIuOSwxLjcsMi45LDIuNGg5LjEKCQkJCWMtMC44LTguMi03LjgtOS44LTExLjktOS44Yy02LjQsMC0xMi4xLDQuMS0xMi4xLDEwLjVjMCw0LjIsMy40LDYuOSw3LjQsOC4xYzUuOSwyLjMsOC4yLDIuNiw4LjIsNC43YzAsMS41LTEuNywyLjQtMy4yLDIuNAoJCQkJYy0wLjQsMC0zLjEsMC0zLjUtMi44aC05LjJjMC45LDguMiw4LDEwLjMsMTIuNywxMC4zYzYuOSwwLDEyLjctNCwxMi43LTEwLjlDMzEzLjcsMzkuMSwzMDguMSwzNy41LDMwMi44LDM2eiIgY2xhc3M9InN0MiI+PC9wYXRoPgoJCTwvZz4KCTwvZz4KCTxnIGNsYXNzPSJzdDEiPgoJCTxnPgoJCQk8cG9seWdvbiBwb2ludHM9IjMzNC4yLDI0LjUgMzM0LjIsMTQuMSAzMjQuOSwxNC4xIDMyNC45LDI0LjUgMzIwLjMsMjQuNSAzMjAuMywzMS42IDMyNC45LDMxLjYgMzI0LjksNTUuNiAKCQkJCTMzNC4yLDU1LjYgMzM0LjIsMzEuNiAzMzguNywzMS42IDMzOC43LDI0LjUiIGNsYXNzPSJzdDIiPjwvcG9seWdvbj4KCQk8L2c+Cgk8L2c+Cgk8ZyBjbGFzcz0ic3QxIj4KCQk8Zz4KCQkJPHBhdGggZD0iTTEwLjYsMjNjMCwyLjktMi40LDUuMy01LjMsNS4zQzIuNCwyOC4zLDAsMjYsMCwyM2MwLTIuOSwyLjQtNS4zLDUuMy01LjNDOC4yLDE3LjcsMTAuNiwyMC4xLDEwLjYsMjN6IiBjbGFzcz0ic3QzIj48L3BhdGg+CgkJPC9nPgoJPC9nPgoJPGcgY2xhc3M9InN0MSI+CgkJPGc+CgkJCTxwYXRoIGQ9Ik03OS42LDI1LjhjMCwwLTEtMS4yLTIuNS0xLjhjLTEuMS0wLjUtMi4zLTAuNi0yLjMtMC42Yy01LjQsMC03LDIuOC03LjksNC41di0zLjVoLTguOHYzMS4xaDkuM1YzOC45CgkJCQljMC00LjQsMi4yLTYuMSw3LTYuMWgwLjNMNzkuNiwyNS44eiIgY2xhc3M9InN0MiI+PC9wYXRoPgoJCTwvZz4KCTwvZz4KCTxnIGNsYXNzPSJzdDEiPgoJCTxnPgoJCQk8cGF0aCBkPSJNMTE0LjMsMzBjMi4zLDMsMy40LDYuNywzLjQsMTAuMmMwLDcuNi01LjQsMTYuNS0xNi43LDE2LjVjLTExLjMsMC0xNi44LTguOS0xNi44LTE2LjV2LTAuMQoJCQkJYzAtMy40LDEuMS03LjEsMy40LTEwLjJsMCwwYzIuNy0zLjYsNy4yLTYuMywxMy4zLTYuM0MxMDcuMSwyMy44LDExMS41LDI2LjQsMTE0LjMsMzBMMTE0LjMsMzB6IE0xMDcuOCwzNy4xCgkJCQljLTEuMS0yLjgtMy44LTQuNy02LjktNC43Yy0zLDAtNS43LDEuOS02LjksNC43TDk0LDM3LjRjLTAuMywwLjktMC41LDEuOC0wLjUsMi44djBjMCw0LjUsMy40LDcuOCw3LjUsNy44YzQsMCw3LjUtMy4zLDcuNS03LjgKCQkJCWMwLTEtMC4yLTItMC41LTIuOEwxMDcuOCwzNy4xeiIgY2xhc3M9InN0MiI+PC9wYXRoPgoJCTwvZz4KCTwvZz4KCTxnIGNsYXNzPSJzdDEiPgoJCTxwYXRoIGQ9Ik0xMDEuMSw2OS4yYy03LjQsMC0xNC40LTIuOS0xOS42LTguMWw0LjMtNC4zYzguMiw4LjIsMjIuNCw4LjIsMzAuNiwwbDQuMyw0LjMKCQkJQzExNS41LDY2LjMsMTA4LjYsNjkuMiwxMDEuMSw2OS4yeiIgY2xhc3M9InN0MyI+PC9wYXRoPgoJPC9nPgoJPGcgY2xhc3M9InN0MSI+CgkJPHBhdGggZD0iTTExNi41LDIzLjNjLTguMi04LjItMjIuNS04LjItMzAuNiwwTDgxLjUsMTlDOTIsOC41LDExMC4zLDguNSwxMjAuOCwxOUwxMTYuNSwyMy4zeiIgY2xhc3M9InN0MyI+PC9wYXRoPgoJPC9nPgoJPGcgY2xhc3M9InN0MSI+CgkJPHBhdGggZD0iTTEwMS4xLDc5LjVjLTkuOCwwLTE5LTMuOC0yNi0xMC44bDQuMy00LjNjNS44LDUuOCwxMy41LDksMjEuNiw5czE1LjktMy4yLDIxLjYtOWw0LjMsNC4zCgkJCUMxMjAuMiw3NS43LDExMSw3OS41LDEwMS4xLDc5LjV6IiBjbGFzcz0ic3Q0Ij48L3BhdGg+Cgk8L2c+Cgk8ZyBjbGFzcz0ic3QxIj4KCQk8cGF0aCBkPSJNMTIyLjgsMTUuMWMtNS44LTUuOC0xMy41LTktMjEuNi05Yy04LjIsMC0xNS45LDMuMi0yMS42LDlsLTQuMy00LjNDODIuMSwzLjgsOTEuMywwLDEwMS4xLDBzMTksMy44LDI2LDEwLjcKCQkJTDEyMi44LDE1LjF6IiBjbGFzcz0ic3Q0Ij48L3BhdGg+Cgk8L2c+Cgk8ZyBjbGFzcz0ic3QxIj4KCQk8cGF0aCBkPSJNNDMuMiwzMy42YzMuMy0xLjksNC43LTUuMSw0LjctOC4yYzAtMy41LTEuMy02LjItMy42LTcuOWMtMi4zLTEuOC01LjctMi44LTkuOS0yLjhoLTE1djQwLjhoMTMuNAoJCQljNi45LDAsOS42LTAuNCwxMy4zLTMuNWMyLjUtMiwzLjgtNS42LDMuOC04LjlDNDkuOSw0MS40LDQ5LjgsMzYsNDMuMiwzMy42eiBNMjkuOSwyMy45aDMuN2MwLjgsMCwxLjksMCwyLjgsMC40CgkJCWMwLjksMC40LDEuNiwxLjIsMS42LDIuN2MwLDEuNi0wLjcsMi40LTEuNywyLjljLTAuOSwwLjQtMiwwLjQtMi44LDAuNGgtMy43VjIzLjl6IE0zNy44LDQ1LjljLTEuMSwwLjUtMi40LDAuNS0zLjEsMC41aC00LjkKCQkJdi03LjRoNC45YzAuOCwwLDIuMSwwLDMuMiwwLjRjMS4xLDAuNCwyLDEuMywyLDMuMUM0MCw0NC40LDM5LDQ1LjQsMzcuOCw0NS45eiIgY2xhc3M9InN0MiI+PC9wYXRoPgoJPC9nPgoJPGcgY2xhc3M9InN0MSI+CgkJPHBhdGggZD0iTTI2Ni45LDYzLjdjMC44LTAuMSwxLjktMC4yLDMuMi0wLjJjMS42LDAsMi45LDAuNCwzLjYsMWMwLjcsMC42LDEuMSwxLjUsMS4xLDIuNmMwLDEuMS0wLjMsMi0xLDIuNwoJCQljLTAuOSwwLjktMi4zLDEuNC0zLjksMS40Yy0wLjUsMC0xLDAtMS4zLTAuMXY1aC0xLjdWNjMuN3ogTTI2OC42LDY5LjhjMC40LDAuMSwwLjgsMC4xLDEuNCwwLjFjMiwwLDMuMi0xLDMuMi0yLjcKCQkJYzAtMS43LTEuMi0yLjUtMy0yLjVjLTAuNywwLTEuMywwLjEtMS42LDAuMVY2OS44eiIgY2xhc3M9InN0NSI+PC9wYXRoPgoJCTxwYXRoIGQ9Ik0yODUsNzEuNmMwLDMuMy0yLjQsNC44LTQuNiw0LjhjLTIuNSwwLTQuNC0xLjgtNC40LTQuNmMwLTMsMi00LjgsNC42LTQuOEMyODMuMiw2Ni45LDI4NSw2OC44LDI4NSw3MS42egoJCQkgTTI3Ny42LDcxLjdjMCwyLDEuMiwzLjUsMi44LDMuNWMxLjYsMCwyLjgtMS41LDIuOC0zLjVjMC0xLjUtMC44LTMuNS0yLjgtMy41UzI3Ny42LDY5LjksMjc3LjYsNzEuN3oiIGNsYXNzPSJzdDUiPjwvcGF0aD4KCQk8cGF0aCBkPSJNMjg3LjYsNjcuMWwxLjIsNC42YzAuMywxLDAuNSwxLjksMC43LDIuOWgwLjFjMC4yLTAuOSwwLjUtMS45LDAuOC0yLjlsMS41LTQuNmgxLjRsMS40LDQuNQoJCQljMC4zLDEuMSwwLjYsMiwwLjgsMi45aDAuMWMwLjItMC45LDAuNC0xLjksMC43LTIuOWwxLjMtNC41aDEuN2wtMyw5aC0xLjVsLTEuNC00LjNjLTAuMy0xLTAuNi0xLjktMC44LTNoMGMtMC4yLDEuMS0wLjUsMi0wLjgsMwoJCQlsLTEuNSw0LjNoLTEuNWwtMi44LTlIMjg3LjZ6IiBjbGFzcz0ic3Q1Ij48L3BhdGg+CgkJPHBhdGggZD0iTTMwMS44LDcxLjljMCwyLjIsMS41LDMuMSwzLjIsMy4xYzEuMiwwLDEuOS0wLjIsMi42LTAuNWwwLjMsMS4yYy0wLjYsMC4zLTEuNiwwLjYtMy4xLDAuNgoJCQljLTIuOSwwLTQuNi0xLjgtNC42LTQuNXMxLjYtNC45LDQuMy00LjljMywwLDMuOCwyLjYsMy44LDQuM2MwLDAuMywwLDAuNi0wLjEsMC44SDMwMS44eiBNMzA2LjgsNzAuOGMwLTEtMC40LTIuNy0yLjMtMi43CgkJCWMtMS43LDAtMi41LDEuNS0yLjYsMi43SDMwNi44eiIgY2xhc3M9InN0NSI+PC9wYXRoPgoJCTxwYXRoIGQ9Ik0zMTAuNSw2OS45YzAtMS4xLDAtMi0wLjEtMi44aDEuNWwwLjEsMS44aDAuMWMwLjQtMS4yLDEuNC0yLDIuNi0yYzAuMiwwLDAuMywwLDAuNSwwLjF2MS41CgkJCWMtMC4yLDAtMC4zLTAuMS0wLjYtMC4xYy0xLjIsMC0yLDAuOS0yLjMsMi4xYzAsMC4yLTAuMSwwLjUtMC4xLDAuOHY0LjhoLTEuN1Y2OS45eiIgY2xhc3M9InN0NSI+PC9wYXRoPgoJCTxwYXRoIGQ9Ik0zMTcuNSw3MS45YzAsMi4yLDEuNSwzLjEsMy4yLDMuMWMxLjIsMCwxLjktMC4yLDIuNi0wLjVsMC4zLDEuMmMtMC42LDAuMy0xLjYsMC42LTMuMSwwLjYKCQkJYy0yLjksMC00LjYtMS44LTQuNi00LjVzMS42LTQuOSw0LjMtNC45YzMsMCwzLjgsMi42LDMuOCw0LjNjMCwwLjMsMCwwLjYtMC4xLDAuOEgzMTcuNXogTTMyMi40LDcwLjhjMC0xLTAuNC0yLjctMi4zLTIuNwoJCQljLTEuNywwLTIuNSwxLjUtMi42LDIuN0gzMjIuNHoiIGNsYXNzPSJzdDUiPjwvcGF0aD4KCQk8cGF0aCBkPSJNMzM0LjIsNjIuOXYxMC45YzAsMC44LDAsMS43LDAuMSwyLjNoLTEuNWwtMC4xLTEuNmgwYy0wLjUsMS0xLjYsMS44LTMuMiwxLjhjLTIuMiwwLTQtMS44LTQtNC42CgkJCWMwLTMsMS45LTQuOCw0LjItNC44YzEuNCwwLDIuNCwwLjcsMi44LDEuNGgwdi01LjRIMzM0LjJ6IE0zMzIuNSw3MC44YzAtMC4yLDAtMC41LTAuMS0wLjdjLTAuMi0xLTEuMi0xLjktMi40LTEuOQoJCQljLTEuNywwLTIuOCwxLjUtMi44LDMuNWMwLDEuOCwwLjksMy4zLDIuNywzLjNjMS4xLDAsMi4yLTAuNywyLjUtMmMwLjEtMC4yLDAuMS0wLjQsMC4xLTAuN1Y3MC44eiIgY2xhc3M9InN0NSI+PC9wYXRoPgoJPC9nPgo8L2c+CjxnIGlkPSJMYXllcl8yIj4KCTxnPgoJCTxnPgoJCQk8Zz4KCQkJCTxyZWN0IGhlaWdodD0iMjMuMSIgd2lkdGg9IjkuMyIgY2xhc3M9InN0NiIgeT0iMzIuNiIgeD0iMS4zIj48L3JlY3Q+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxnPgoJCQkJPHBhdGggZD0iTTE0OC4xLDI4Yy0xLjItMS45LTQuMS00LjQtOS4yLTQuNGMtOC4zLDAtMTUuNiw2LjQtMTUuNiwxNi42YzAsOC45LDUuOCwxNi42LDE1LjYsMTYuNgoJCQkJCWMzLjYsMCw3LjUtMS40LDkuMi00LjR2My40aDkuM3YtMzFoLTkuM1YyOHogTTE0OC4xLDQwLjdjLTAuMSwxLjQtMC41LDIuNy0xLjMsNGMtMS4yLDEuOS0zLjIsMy41LTYuNSwzLjUKCQkJCQljLTUuNiwwLTcuNy00LjktNy43LTcuOHYtMC4xYzAtMy41LDIuNC04LDcuNy04YzMuOSwwLDYuMSwyLjIsNy4xLDQuM0MxNDcuOSwzNy45LDE0OC4yLDM5LjMsMTQ4LjEsNDAuN3oiIGNsYXNzPSJzdDYiPjwvcGF0aD4KCQkJPC9nPgoJCTwvZz4KCQk8Zz4KCQkJPGc+CgkJCQk8cGF0aCBkPSJNMTg5LjYsMjR2My40Yy0xLTEtMy42LTMuNy05LjEtMy43Yy03LjksMC0xNS40LDYtMTUuNCwxNi41YzAsOS4zLDYuMiwxNi42LDE1LjUsMTYuNgoJCQkJCWM2LjMsMCw4LjUtMy4xLDkuNC00LjN2My40aDguOFYxNC4zaC05LjNWMjR6IE0xODcuOSw0NS43Yy0xLjUsMS41LTMuNSwyLjQtNS44LDIuNGMtNC40LDAtNy44LTMuMi03LjgtNy45VjQwCgkJCQkJYzAtMy42LDIuNS03LjgsNy45LTcuOGMyLjIsMCw0LjEsMC44LDUuNSwyLjJjMS40LDEuMywyLjMsMy4zLDIuMyw1LjVDMTkwLjIsNDIuMiwxODkuNCw0NC4yLDE4Ny45LDQ1Ljd6IiBjbGFzcz0ic3Q2Ij48L3BhdGg+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxnPgoJCQkJPHBhdGggZD0iTTIyMi43LDQ4LjFjLTQuNCwwLTcuNC0zLjQtNy40LTcuOWMwLTIuMiwwLjctNC4zLDItNS43YzEuNC0xLjUsMy4yLTIuMyw1LjQtMi4yYzMuOSwwLDUuNywyLjIsNi43LDQuNAoJCQkJCWg5LjRjLTEuNi03LjYtOC4yLTEzLTE2LjQtMTNjLTkuMywwLTE2LjQsNy40LTE2LjQsMTYuNWMwLDkuMiw3LjIsMTYuNiwxNi42LDE2LjZjOC40LDAsMTQuNi01LjgsMTYuMy0xMi44aC05LjUKCQkJCQlDMjI4LjQsNDUuOCwyMjYuNSw0OC4xLDIyMi43LDQ4LjF6IiBjbGFzcz0ic3Q2Ij48L3BhdGg+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxnPgoJCQkJPHBhdGggZD0iTTI3MC44LDI4Yy0xLjItMS45LTQuMS00LjQtOS4yLTQuNGMtOC4zLDAtMTUuNiw2LjQtMTUuNiwxNi42YzAsOC45LDUuOCwxNi42LDE1LjYsMTYuNgoJCQkJCWMzLjYsMCw3LjUtMS40LDkuMi00LjR2My40aDkuM3YtMzFoLTkuM1YyOHogTTI3MC44LDQwLjdjLTAuMSwxLjQtMC41LDIuNy0xLjMsNGMtMS4yLDEuOS0zLjIsMy41LTYuNSwzLjUKCQkJCQljLTUuNiwwLTcuNy00LjktNy43LTcuOHYtMC4xYzAtMy41LDIuMy04LDcuNy04YzMuOSwwLDYsMi4yLDcsNC4zQzI3MC43LDM3LjksMjcwLjksMzkuMywyNzAuOCw0MC43eiIgY2xhc3M9InN0NiI+PC9wYXRoPgoJCQk8L2c+CgkJPC9nPgoJCTxnPgoJCQk8Zz4KCQkJCTxwYXRoIGQ9Ik0zMDIuOSwzNi4yYy0yLjUtMC43LTQuNy0xLjctNC43LTMuMWMwLTAuOSwwLjctMi4xLDIuNi0yLjFjMi43LDAsMi45LDEuNywyLjksMi40aDkuMQoJCQkJCWMtMC44LTguMi03LjgtOS44LTExLjktOS44Yy02LjQsMC0xMiw0LjEtMTIsMTAuNWMwLDQuMiwzLjQsNi44LDcuNCw4LjFjNS45LDIuMyw4LjIsMi42LDguMiw0LjdjMCwxLjUtMS43LDIuNC0zLjIsMi40CgkJCQkJYy0wLjQsMC0zLjEsMC0zLjUtMi44aC05LjJjMC44LDguMiw3LjksMTAuMywxMi42LDEwLjNjNi45LDAsMTIuNi00LDEyLjYtMTAuOEMzMTMuOCwzOS4yLDMwOC4yLDM3LjYsMzAyLjksMzYuMnoiIGNsYXNzPSJzdDYiPjwvcGF0aD4KCQkJPC9nPgoJCTwvZz4KCQk8Zz4KCQkJPGc+CgkJCQk8cG9seWdvbiBwb2ludHM9IjMzNC4yLDI0LjcgMzM0LjIsMTQuMyAzMjQuOSwxNC4zIDMyNC45LDI0LjcgMzIwLjMsMjQuNyAzMjAuMywzMS43IDMyNC45LDMxLjcgMzI0LjksNTUuNyAKCQkJCQkzMzQuMiw1NS43IDMzNC4yLDMxLjcgMzM4LjcsMzEuNyAzMzguNywyNC43IiBjbGFzcz0ic3Q2Ij48L3BvbHlnb24+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxnPgoJCQkJPHBhdGggZD0iTTExLjIsMjMuMmMwLDIuOS0yLjQsNS4zLTUuMyw1LjNjLTIuOSwwLTUuMy0yLjQtNS4zLTUuM2MwLTIuOSwyLjQtNS4zLDUuMy01LjMKCQkJCQlDOC45LDE3LjksMTEuMiwyMC4zLDExLjIsMjMuMnoiIGNsYXNzPSJzdDciPjwvcGF0aD4KCQkJPC9nPgoJCTwvZz4KCQk8Zz4KCQkJPGc+CgkJCQk8cGF0aCBkPSJNODAuMSwyNmMwLDAtMS0xLjItMi41LTEuOGMtMS4xLTAuNS0yLjMtMC42LTIuMy0wLjZjLTUuNCwwLTcsMi44LTcuOSw0LjV2LTMuNWgtOC43djMxSDY4VjM5CgkJCQkJYzAtNC40LDIuMi02LjEsNy02LjFoMC4zTDgwLjEsMjZ6IiBjbGFzcz0ic3Q2Ij48L3BhdGg+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxnPgoJCQkJPHBhdGggZD0iTTExNC44LDMwLjJjMi4zLDMsMy40LDYuNywzLjQsMTAuMmMwLDcuNi01LjQsMTYuNS0xNi43LDE2LjVjLTExLjMsMC0xNi43LTguOS0xNi43LTE2LjV2LTAuMQoJCQkJCWMwLTMuNCwxLjEtNy4xLDMuNC0xMC4ybDAsMGMyLjctMy42LDcuMS02LjIsMTMuMy02LjJDMTA3LjYsMjMuOSwxMTIsMjYuNSwxMTQuOCwzMC4yTDExNC44LDMwLjJ6IE0xMDguMywzNy4yCgkJCQkJYy0xLjEtMi44LTMuOC00LjctNi44LTQuN2MtMywwLTUuNywxLjktNi45LDQuN2wtMC4xLDAuMmMtMC4zLDAuOS0wLjUsMS44LTAuNSwyLjh2MGMwLDQuNSwzLjQsNy44LDcuNSw3LjgKCQkJCQljNCwwLDcuNC0zLjMsNy40LTcuOGMwLTEtMC4yLTEuOS0wLjUtMi44TDEwOC4zLDM3LjJ6IiBjbGFzcz0ic3Q2Ij48L3BhdGg+CgkJCTwvZz4KCQk8L2c+CgkJPGc+CgkJCTxwYXRoIGQ9Ik0xMDEuNiw2OS4zYy03LjQsMC0xNC40LTIuOS0xOS42LTguMWw0LjMtNC4zYzguMiw4LjIsMjIuNCw4LjIsMzAuNiwwbDQuMyw0LjMKCQkJCUMxMTYsNjYuNCwxMDksNjkuMywxMDEuNiw2OS4zeiIgY2xhc3M9InN0NyI+PC9wYXRoPgoJCTwvZz4KCQk8Zz4KCQkJPHBhdGggZD0iTTExNi45LDIzLjVjLTguMi04LjItMjIuNC04LjItMzAuNiwwTDgyLDE5LjFjMTAuNS0xMC41LDI4LjctMTAuNSwzOS4yLDBMMTE2LjksMjMuNXoiIGNsYXNzPSJzdDciPjwvcGF0aD4KCQk8L2c+CgkJPGc+CgkJCTxwYXRoIGQ9Ik0xMDEuNiw3OS42Yy05LjgsMC0xOS0zLjgtMjUuOS0xMC43bDQuMy00LjNjNS44LDUuOCwxMy40LDguOSwyMS42LDguOWM4LjIsMCwxNS44LTMuMiwyMS42LTguOWw0LjMsNC4zCgkJCQlDMTIwLjYsNzUuOCwxMTEuNCw3OS42LDEwMS42LDc5LjZ6IiBjbGFzcz0ic3Q4Ij48L3BhdGg+CgkJPC9nPgoJCTxnPgoJCQk8cGF0aCBkPSJNMTIzLjIsMTUuM2MtNS44LTUuOC0xMy40LTguOS0yMS42LTguOWMtOC4yLDAtMTUuOCwzLjItMjEuNiw4LjlsLTQuMy00LjNDODIuNiw0LDkxLjgsMC4yLDEwMS42LDAuMgoJCQkJYzkuOCwwLDE5LDMuOCwyNS45LDEwLjdMMTIzLjIsMTUuM3oiIGNsYXNzPSJzdDgiPjwvcGF0aD4KCQk8L2c+CgkJPGc+CgkJCTxwYXRoIGQ9Ik00My44LDMzLjhjMy4zLTEuOSw0LjctNS4xLDQuNy04LjJjMC0zLjUtMS4zLTYuMi0zLjYtNy45Yy0yLjMtMS44LTUuNy0yLjgtOS45LTIuOEgyMHY0MC44aDEzLjQKCQkJCWM2LjksMCw5LjYtMC40LDEzLjMtMy41YzIuNS0yLDMuOC01LjYsMy44LTguOUM1MC41LDQxLjUsNTAuMywzNi4xLDQzLjgsMzMuOHogTTMwLjQsMjRoMy43YzAuOCwwLDEuOSwwLDIuOCwwLjQKCQkJCWMwLjksMC40LDEuNiwxLjIsMS42LDIuN2MwLDEuNi0wLjcsMi40LTEuNywyLjljLTAuOSwwLjQtMiwwLjQtMi44LDAuNGgtMy43VjI0eiBNMzguNCw0NmMtMS4xLDAuNS0yLjQsMC41LTMuMSwwLjVoLTQuOXYtNy40CgkJCQloNC45YzAuOCwwLDIuMSwwLDMuMiwwLjRjMS4xLDAuNCwyLDEuMywyLDMuMUM0MC41LDQ0LjUsMzkuNiw0NS41LDM4LjQsNDZ6IiBjbGFzcz0ic3Q2Ij48L3BhdGg+CgkJPC9nPgoJPC9nPgoJPGc+CgkJPHBhdGggZD0iTTI2Nyw2NGMwLjgtMC4xLDEuOS0wLjIsMy4yLTAuMmMxLjYsMCwyLjgsMC40LDMuNiwxYzAuNywwLjYsMS4xLDEuNSwxLjEsMi42YzAsMS4xLTAuMywyLTEsMi43CgkJCWMtMC45LDAuOS0yLjMsMS40LTMuOSwxLjRjLTAuNSwwLTEsMC0xLjMtMC4xdjVIMjY3VjY0eiBNMjY4LjcsNzBjMC40LDAuMSwwLjgsMC4xLDEuNCwwLjFjMiwwLDMuMi0wLjksMy4yLTIuNwoJCQljMC0xLjctMS4yLTIuNS0zLTIuNWMtMC43LDAtMS4zLDAuMS0xLjYsMC4xVjcweiIgY2xhc3M9InN0OSI+PC9wYXRoPgoJCTxwYXRoIGQ9Ik0yODUsNzEuOGMwLDMuMy0yLjQsNC44LTQuNiw0LjhjLTIuNSwwLTQuNC0xLjgtNC40LTQuNmMwLTMsMi00LjgsNC42LTQuOEMyODMuMiw2Ny4xLDI4NSw2OSwyODUsNzEuOHoKCQkJIE0yNzcuNyw3MS45YzAsMiwxLjIsMy41LDIuOCwzLjVjMS42LDAsMi44LTEuNSwyLjgtMy41YzAtMS41LTAuOC0zLjUtMi44LTMuNVMyNzcuNyw3MC4yLDI3Ny43LDcxLjl6IiBjbGFzcz0ic3Q5Ij48L3BhdGg+CgkJPHBhdGggZD0iTTI4Ny43LDY3LjNsMS4yLDQuNmMwLjMsMSwwLjUsMS45LDAuNywyLjloMC4xYzAuMi0wLjksMC41LTEuOSwwLjgtMi44bDEuNS00LjZoMS40bDEuNCw0LjUKCQkJYzAuMywxLjEsMC42LDIsMC44LDIuOWgwLjFjMC4yLTAuOSwwLjQtMS45LDAuNy0yLjlsMS4zLTQuNWgxLjdsLTMsOWgtMS41bC0xLjQtNC4zYy0wLjMtMS0wLjYtMS45LTAuOC0zaDBjLTAuMiwxLjEtMC41LDItMC44LDMKCQkJbC0xLjUsNC4zaC0xLjVsLTIuOC05SDI4Ny43eiIgY2xhc3M9InN0OSI+PC9wYXRoPgoJCTxwYXRoIGQ9Ik0zMDEuOCw3Mi4xYzAsMi4yLDEuNSwzLjEsMy4yLDMuMWMxLjIsMCwxLjktMC4yLDIuNi0wLjVsMC4zLDEuMmMtMC42LDAuMy0xLjYsMC42LTMuMSwwLjYKCQkJYy0yLjgsMC00LjUtMS44LTQuNS00LjVzMS42LTQuOSw0LjMtNC45YzMsMCwzLjgsMi42LDMuOCw0LjJjMCwwLjMsMCwwLjYtMC4xLDAuOEgzMDEuOHogTTMwNi44LDcxYzAtMS0wLjQtMi43LTIuMy0yLjcKCQkJYy0xLjcsMC0yLjQsMS41LTIuNiwyLjdIMzA2Ljh6IiBjbGFzcz0ic3Q5Ij48L3BhdGg+CgkJPHBhdGggZD0iTTMxMC41LDcwLjJjMC0xLjEsMC0yLTAuMS0yLjhoMS41bDAuMSwxLjhoMC4xYzAuNC0xLjIsMS40LTIsMi42LTJjMC4yLDAsMC4zLDAsMC41LDAuMXYxLjUKCQkJYy0wLjIsMC0wLjMtMC4xLTAuNi0wLjFjLTEuMiwwLTIsMC45LTIuMywyLjFjMCwwLjItMC4xLDAuNS0wLjEsMC44djQuOGgtMS43VjcwLjJ6IiBjbGFzcz0ic3Q5Ij48L3BhdGg+CgkJPHBhdGggZD0iTTMxNy41LDcyLjFjMCwyLjIsMS41LDMuMSwzLjIsMy4xYzEuMiwwLDEuOS0wLjIsMi42LTAuNWwwLjMsMS4yYy0wLjYsMC4zLTEuNiwwLjYtMy4xLDAuNgoJCQljLTIuOCwwLTQuNi0xLjgtNC42LTQuNXMxLjYtNC45LDQuMy00LjljMywwLDMuOCwyLjYsMy44LDQuMmMwLDAuMywwLDAuNi0wLjEsMC44SDMxNy41eiBNMzIyLjQsNzFjMC0xLTAuNC0yLjctMi4zLTIuNwoJCQljLTEuNywwLTIuNCwxLjUtMi42LDIuN0gzMjIuNHoiIGNsYXNzPSJzdDkiPjwvcGF0aD4KCQk8cGF0aCBkPSJNMzM0LjEsNjMuMVY3NGMwLDAuOCwwLDEuNywwLjEsMi4zaC0xLjVsLTAuMS0xLjZoMGMtMC41LDEtMS42LDEuOC0zLjIsMS44Yy0yLjIsMC00LTEuOC00LTQuNgoJCQljMC0zLDEuOS00LjgsNC4xLTQuOGMxLjQsMCwyLjQsMC43LDIuOCwxLjRoMHYtNS40SDMzNC4xeiBNMzMyLjQsNzFjMC0wLjIsMC0wLjUtMC4xLTAuN2MtMC4yLTEtMS4yLTEuOS0yLjQtMS45CgkJCWMtMS43LDAtMi44LDEuNS0yLjgsMy41YzAsMS44LDAuOSwzLjMsMi43LDMuM2MxLjEsMCwyLjItMC43LDIuNS0yYzAuMS0wLjIsMC4xLTAuNCwwLjEtMC43VjcxeiIgY2xhc3M9InN0OSI+PC9wYXRoPgoJPC9nPgo8L2c+Cjwvc3ZnPgo=', 'dark': 'PHN2ZyB4bWw6c3BhY2U9InByZXNlcnZlIiBzdHlsZT0iZW5hYmxlLWJhY2tncm91bmQ6bmV3IDAgMCAzMzguNyA3OS41OyIgdmlld0JveD0iMCAwIDMzOC43IDc5LjUiIHk9IjBweCIgeD0iMHB4IiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBpZD0iTGF5ZXJfMSIgdmVyc2lvbj0iMS4xIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojRENERERFO30KCS5zdDF7ZmlsbDojOTM5NTk4O30KCS5zdDJ7ZmlsbDojNTg1OTVCO30KCS5zdDN7ZmlsbDojOEM5Mzk4O30KPC9zdHlsZT4KPGc+Cgk8Zz4KCQk8cmVjdCBoZWlnaHQ9IjIzLjIiIHdpZHRoPSI5LjMiIGNsYXNzPSJzdDAiIHk9IjMyLjQiIHg9IjAuNiI+PC9yZWN0PgoJPC9nPgo8L2c+CjxnPgoJPGc+CgkJPHBhdGggZD0iTTE0Ny43LDI3LjhjLTEuMi0xLjktNC4xLTQuNC05LjItNC40Yy04LjMsMC0xNS42LDYuNC0xNS42LDE2LjZjMCw4LjksNS44LDE2LjYsMTUuNiwxNi42CgkJCWMzLjYsMCw3LjUtMS40LDkuMi00LjR2My40aDkuM1YyNC41aC05LjNWMjcuOHogTTE0Ny43LDQwLjVjLTAuMSwxLjQtMC41LDIuNy0xLjMsNGMtMS4yLDEuOS0zLjIsMy41LTYuNSwzLjUKCQkJYy01LjYsMC03LjctNC45LTcuNy03Ljh2LTAuMWMwLTMuNSwyLjQtOCw3LjctOGMzLjksMCw2LjEsMi4yLDcuMSw0LjNDMTQ3LjUsMzcuNywxNDcuOCwzOS4xLDE0Ny43LDQwLjV6IiBjbGFzcz0ic3QwIj48L3BhdGg+Cgk8L2c+CjwvZz4KPGc+Cgk8Zz4KCQk8cGF0aCBkPSJNMTg5LjMsMjMuOHYzLjRjLTEtMS0zLjYtMy43LTkuMS0zLjdjLTcuOSwwLTE1LjQsNi0xNS40LDE2LjVjMCw5LjQsNi4yLDE2LjYsMTUuNiwxNi42CgkJCWM2LjMsMCw4LjUtMy4xLDkuNC00LjR2My40aDguOFYxNC4xaC05LjNWMjMuOHogTTE4Ny42LDQ1LjZjLTEuNSwxLjUtMy41LDIuNC01LjgsMi40Yy00LjQsMC03LjgtMy4yLTcuOC04di0wLjEKCQkJYzAtMy42LDIuNS03LjgsNy45LTcuOGMyLjIsMCw0LjIsMC44LDUuNiwyLjJjMS40LDEuMywyLjMsMy4zLDIuMyw1LjVDMTg5LjksNDIuMSwxODkuMSw0NC4xLDE4Ny42LDQ1LjZ6IiBjbGFzcz0ic3QwIj48L3BhdGg+Cgk8L2c+CjwvZz4KPGc+Cgk8Zz4KCQk8cGF0aCBkPSJNMjIyLjUsNDcuOWMtNC40LDAtNy40LTMuNC03LjQtNy45YzAtMi4yLDAuNy00LjMsMi01LjdjMS40LTEuNSwzLjItMi4zLDUuNC0yLjJjMy45LDAsNS43LDIuMiw2LjcsNC40aDkuNAoJCQljLTEuNi03LjYtOC4yLTEzLjEtMTYuNS0xMy4xYy05LjMsMC0xNi40LDcuNC0xNi40LDE2LjVjMCw5LjIsNy4yLDE2LjYsMTYuNiwxNi42YzguNCwwLDE0LjYtNS44LDE2LjMtMTIuOGgtOS41CgkJCUMyMjguMiw0NS43LDIyNi4zLDQ3LjksMjIyLjUsNDcuOXoiIGNsYXNzPSJzdDAiPjwvcGF0aD4KCTwvZz4KPC9nPgo8Zz4KCTxnPgoJCTxwYXRoIGQ9Ik0yNzAuNywyNy44Yy0xLjItMS45LTQuMS00LjQtOS4yLTQuNGMtOC4zLDAtMTUuNiw2LjQtMTUuNiwxNi42YzAsOC45LDUuOCwxNi42LDE1LjYsMTYuNgoJCQljMy42LDAsNy41LTEuNCw5LjItNC40djMuNGg5LjNWMjQuNWgtOS4zVjI3Ljh6IE0yNzAuNyw0MC41Yy0wLjEsMS40LTAuNSwyLjctMS4zLDRjLTEuMiwxLjktMy4yLDMuNS02LjUsMy41CgkJCWMtNS42LDAtNy43LTQuOS03LjctNy44di0wLjFjMC0zLjUsMi4zLTgsNy43LThjMy45LDAsNiwyLjIsNy4xLDQuM0MyNzAuNSwzNy43LDI3MC44LDM5LjEsMjcwLjcsNDAuNXoiIGNsYXNzPSJzdDAiPjwvcGF0aD4KCTwvZz4KPC9nPgo8Zz4KCTxnPgoJCTxwYXRoIGQ9Ik0zMDIuOCwzNmMtMi41LTAuNy00LjgtMS43LTQuOC0zLjFjMC0wLjksMC43LTIuMSwyLjYtMi4xYzIuNywwLDIuOSwxLjcsMi45LDIuNGg5LjEKCQkJYy0wLjgtOC4yLTcuOC05LjgtMTEuOS05LjhjLTYuNCwwLTEyLjEsNC4xLTEyLjEsMTAuNWMwLDQuMiwzLjQsNi45LDcuNCw4LjFjNS45LDIuMyw4LjIsMi42LDguMiw0LjdjMCwxLjUtMS43LDIuNC0zLjIsMi40CgkJCWMtMC40LDAtMy4xLDAtMy41LTIuOGgtOS4yYzAuOSw4LjIsOCwxMC4zLDEyLjcsMTAuM2M2LjksMCwxMi43LTQsMTIuNy0xMC45QzMxMy43LDM5LjEsMzA4LjEsMzcuNSwzMDIuOCwzNnoiIGNsYXNzPSJzdDAiPjwvcGF0aD4KCTwvZz4KPC9nPgo8Zz4KCTxnPgoJCTxwb2x5Z29uIHBvaW50cz0iMzM0LjIsMjQuNSAzMzQuMiwxNC4xIDMyNC45LDE0LjEgMzI0LjksMjQuNSAzMjAuMywyNC41IDMyMC4zLDMxLjYgMzI0LjksMzEuNiAzMjQuOSw1NS42IAoJCQkzMzQuMiw1NS42IDMzNC4yLDMxLjYgMzM4LjcsMzEuNiAzMzguNywyNC41IiBjbGFzcz0ic3QwIj48L3BvbHlnb24+Cgk8L2c+CjwvZz4KPGc+Cgk8Zz4KCQk8cGF0aCBkPSJNMTAuNiwyM2MwLDIuOS0yLjQsNS4zLTUuMyw1LjNDMi40LDI4LjMsMCwyNiwwLDIzYzAtMi45LDIuNC01LjMsNS4zLTUuM0M4LjIsMTcuNywxMC42LDIwLjEsMTAuNiwyM3oiIGNsYXNzPSJzdDEiPjwvcGF0aD4KCTwvZz4KPC9nPgo8Zz4KCTxnPgoJCTxwYXRoIGQ9Ik03OS42LDI1LjhjMCwwLTEtMS4yLTIuNS0xLjhjLTEuMS0wLjUtMi4zLTAuNi0yLjMtMC42Yy01LjQsMC03LDIuOC03LjksNC41di0zLjVoLTguOHYzMS4xaDkuM1YzOC45CgkJCWMwLTQuNCwyLjItNi4xLDctNi4xaDAuM0w3OS42LDI1Ljh6IiBjbGFzcz0ic3QwIj48L3BhdGg+Cgk8L2c+CjwvZz4KPGc+Cgk8Zz4KCQk8cGF0aCBkPSJNMTE0LjMsMzBjMi4zLDMsMy40LDYuNywzLjQsMTAuMmMwLDcuNi01LjQsMTYuNS0xNi43LDE2LjVjLTExLjMsMC0xNi44LTguOS0xNi44LTE2LjV2LTAuMQoJCQljMC0zLjQsMS4xLTcuMSwzLjQtMTAuMmwwLDBjMi43LTMuNiw3LjItNi4zLDEzLjMtNi4zQzEwNy4xLDIzLjgsMTExLjUsMjYuNCwxMTQuMywzMEwxMTQuMywzMHogTTEwNy44LDM3LjEKCQkJYy0xLjEtMi44LTMuOC00LjctNi45LTQuN2MtMywwLTUuNywxLjktNi45LDQuN0w5NCwzNy40Yy0wLjMsMC45LTAuNSwxLjgtMC41LDIuOHYwYzAsNC41LDMuNCw3LjgsNy41LDcuOGM0LDAsNy41LTMuMyw3LjUtNy44CgkJCWMwLTEtMC4yLTItMC41LTIuOEwxMDcuOCwzNy4xeiIgY2xhc3M9InN0MCI+PC9wYXRoPgoJPC9nPgo8L2c+CjxnPgoJPHBhdGggZD0iTTEwMS4xLDY5LjJjLTcuNCwwLTE0LjQtMi45LTE5LjYtOC4xbDQuMy00LjNjOC4yLDguMiwyMi40LDguMiwzMC42LDBsNC4zLDQuMwoJCUMxMTUuNSw2Ni4zLDEwOC42LDY5LjIsMTAxLjEsNjkuMnoiIGNsYXNzPSJzdDEiPjwvcGF0aD4KPC9nPgo8Zz4KCTxwYXRoIGQ9Ik0xMTYuNSwyMy4zYy04LjItOC4yLTIyLjUtOC4yLTMwLjYsMEw4MS41LDE5QzkyLDguNSwxMTAuMyw4LjUsMTIwLjgsMTlMMTE2LjUsMjMuM3oiIGNsYXNzPSJzdDEiPjwvcGF0aD4KPC9nPgo8Zz4KCTxwYXRoIGQ9Ik0xMDEuMSw3OS41Yy05LjgsMC0xOS0zLjgtMjYtMTAuOGw0LjMtNC4zYzUuOCw1LjgsMTMuNSw5LDIxLjYsOXMxNS45LTMuMiwyMS42LTlsNC4zLDQuMwoJCUMxMjAuMiw3NS43LDExMSw3OS41LDEwMS4xLDc5LjV6IiBjbGFzcz0ic3QyIj48L3BhdGg+CjwvZz4KPGc+Cgk8cGF0aCBkPSJNMTIyLjgsMTUuMWMtNS44LTUuOC0xMy41LTktMjEuNi05Yy04LjIsMC0xNS45LDMuMi0yMS42LDlsLTQuMy00LjNDODIuMSwzLjgsOTEuMywwLDEwMS4xLDBzMTksMy44LDI2LDEwLjcKCQlMMTIyLjgsMTUuMXoiIGNsYXNzPSJzdDIiPjwvcGF0aD4KPC9nPgo8Zz4KCTxwYXRoIGQ9Ik00My4yLDMzLjZjMy4zLTEuOSw0LjctNS4xLDQuNy04LjJjMC0zLjUtMS4zLTYuMi0zLjYtNy45Yy0yLjMtMS44LTUuNy0yLjgtOS45LTIuOGgtMTV2NDAuOGgxMy40CgkJYzYuOSwwLDkuNi0wLjQsMTMuMy0zLjVjMi41LTIsMy44LTUuNiwzLjgtOC45QzQ5LjksNDEuNCw0OS44LDM2LDQzLjIsMzMuNnogTTI5LjksMjMuOWgzLjdjMC44LDAsMS45LDAsMi44LDAuNAoJCWMwLjksMC40LDEuNiwxLjIsMS42LDIuN2MwLDEuNi0wLjcsMi40LTEuNywyLjljLTAuOSwwLjQtMiwwLjQtMi44LDAuNGgtMy43VjIzLjl6IE0zNy44LDQ1LjljLTEuMSwwLjUtMi40LDAuNS0zLjEsMC41aC00Ljl2LTcuNAoJCWg0LjljMC44LDAsMi4xLDAsMy4yLDAuNGMxLjEsMC40LDIsMS4zLDIsMy4xQzQwLDQ0LjQsMzksNDUuNCwzNy44LDQ1Ljl6IiBjbGFzcz0ic3QwIj48L3BhdGg+CjwvZz4KPGc+Cgk8cGF0aCBkPSJNMjY2LjksNjMuN2MwLjgtMC4xLDEuOS0wLjIsMy4yLTAuMmMxLjYsMCwyLjksMC40LDMuNiwxYzAuNywwLjYsMS4xLDEuNSwxLjEsMi42YzAsMS4xLTAuMywyLTEsMi43CgkJYy0wLjksMC45LTIuMywxLjQtMy45LDEuNGMtMC41LDAtMSwwLTEuMy0wLjF2NWgtMS43VjYzLjd6IE0yNjguNiw2OS44YzAuNCwwLjEsMC44LDAuMSwxLjQsMC4xYzIsMCwzLjItMSwzLjItMi43CgkJYzAtMS43LTEuMi0yLjUtMy0yLjVjLTAuNywwLTEuMywwLjEtMS42LDAuMVY2OS44eiIgY2xhc3M9InN0MyI+PC9wYXRoPgoJPHBhdGggZD0iTTI4NSw3MS42YzAsMy4zLTIuNCw0LjgtNC42LDQuOGMtMi41LDAtNC40LTEuOC00LjQtNC42YzAtMywyLTQuOCw0LjYtNC44QzI4My4yLDY2LjksMjg1LDY4LjgsMjg1LDcxLjZ6CgkJIE0yNzcuNiw3MS43YzAsMiwxLjIsMy41LDIuOCwzLjVjMS42LDAsMi44LTEuNSwyLjgtMy41YzAtMS41LTAuOC0zLjUtMi44LTMuNVMyNzcuNiw2OS45LDI3Ny42LDcxLjd6IiBjbGFzcz0ic3QzIj48L3BhdGg+Cgk8cGF0aCBkPSJNMjg3LjYsNjcuMWwxLjIsNC42YzAuMywxLDAuNSwxLjksMC43LDIuOWgwLjFjMC4yLTAuOSwwLjUtMS45LDAuOC0yLjlsMS41LTQuNmgxLjRsMS40LDQuNQoJCWMwLjMsMS4xLDAuNiwyLDAuOCwyLjloMC4xYzAuMi0wLjksMC40LTEuOSwwLjctMi45bDEuMy00LjVoMS43bC0zLDloLTEuNWwtMS40LTQuM2MtMC4zLTEtMC42LTEuOS0wLjgtM2gwYy0wLjIsMS4xLTAuNSwyLTAuOCwzCgkJbC0xLjUsNC4zaC0xLjVsLTIuOC05SDI4Ny42eiIgY2xhc3M9InN0MyI+PC9wYXRoPgoJPHBhdGggZD0iTTMwMS44LDcxLjljMCwyLjIsMS41LDMuMSwzLjIsMy4xYzEuMiwwLDEuOS0wLjIsMi42LTAuNWwwLjMsMS4yYy0wLjYsMC4zLTEuNiwwLjYtMy4xLDAuNgoJCWMtMi45LDAtNC42LTEuOC00LjYtNC41czEuNi00LjksNC4zLTQuOWMzLDAsMy44LDIuNiwzLjgsNC4zYzAsMC4zLDAsMC42LTAuMSwwLjhIMzAxLjh6IE0zMDYuOCw3MC44YzAtMS0wLjQtMi43LTIuMy0yLjcKCQljLTEuNywwLTIuNSwxLjUtMi42LDIuN0gzMDYuOHoiIGNsYXNzPSJzdDMiPjwvcGF0aD4KCTxwYXRoIGQ9Ik0zMTAuNSw2OS45YzAtMS4xLDAtMi0wLjEtMi44aDEuNWwwLjEsMS44aDAuMWMwLjQtMS4yLDEuNC0yLDIuNi0yYzAuMiwwLDAuMywwLDAuNSwwLjF2MS41CgkJYy0wLjIsMC0wLjMtMC4xLTAuNi0wLjFjLTEuMiwwLTIsMC45LTIuMywyLjFjMCwwLjItMC4xLDAuNS0wLjEsMC44djQuOGgtMS43VjY5Ljl6IiBjbGFzcz0ic3QzIj48L3BhdGg+Cgk8cGF0aCBkPSJNMzE3LjUsNzEuOWMwLDIuMiwxLjUsMy4xLDMuMiwzLjFjMS4yLDAsMS45LTAuMiwyLjYtMC41bDAuMywxLjJjLTAuNiwwLjMtMS42LDAuNi0zLjEsMC42CgkJYy0yLjksMC00LjYtMS44LTQuNi00LjVzMS42LTQuOSw0LjMtNC45YzMsMCwzLjgsMi42LDMuOCw0LjNjMCwwLjMsMCwwLjYtMC4xLDAuOEgzMTcuNXogTTMyMi40LDcwLjhjMC0xLTAuNC0yLjctMi4zLTIuNwoJCWMtMS43LDAtMi41LDEuNS0yLjYsMi43SDMyMi40eiIgY2xhc3M9InN0MyI+PC9wYXRoPgoJPHBhdGggZD0iTTMzNC4yLDYyLjl2MTAuOWMwLDAuOCwwLDEuNywwLjEsMi4zaC0xLjVsLTAuMS0xLjZoMGMtMC41LDEtMS42LDEuOC0zLjIsMS44Yy0yLjIsMC00LTEuOC00LTQuNgoJCWMwLTMsMS45LTQuOCw0LjItNC44YzEuNCwwLDIuNCwwLjcsMi44LDEuNGgwdi01LjRIMzM0LjJ6IE0zMzIuNSw3MC44YzAtMC4yLDAtMC41LTAuMS0wLjdjLTAuMi0xLTEuMi0xLjktMi40LTEuOQoJCWMtMS43LDAtMi44LDEuNS0yLjgsMy41YzAsMS44LDAuOSwzLjMsMi43LDMuM2MxLjEsMCwyLjItMC43LDIuNS0yYzAuMS0wLjIsMC4xLTAuNCwwLjEtMC43VjcwLjh6IiBjbGFzcz0ic3QzIj48L3BhdGg+CjwvZz4KPC9zdmc+Cg=='}
 
 PAGE = r"""<!doctype html>
 <html lang="en">
@@ -2889,6 +3036,23 @@ label { display: block; }
 }
 .brand { font: 600 19px/1 var(--round); letter-spacing: -.01em; margin-right: 6px; }
 .brand b { color: var(--accent); font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 6px; }
+.brand img { width: 25px; height: 25px; }
+.brand-block { flex: 0 0 auto; }
+.maker { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+.powered { display: inline-block; flex: 0 0 auto; line-height: 0; }
+.powered img { width: 132px; height: auto; }
+.powered .powered-dark { display: none; }
+:root[data-theme="dark"] .powered .powered-light { display: none; }
+:root[data-theme="dark"] .powered .powered-dark { display: inline; }
+.update-wrap { position: relative; }
+.appearance-panel.update-panel { width: 310px; max-width: calc(100vw - 28px); }
+.update-panel p { margin: 0; font-size: 13px; color: var(--muted); }
+.update-panel .check { display: flex; gap: 8px; align-items: flex-start; }
+.update-panel .row-gap { display: flex; gap: 8px; flex-wrap: wrap; }
+.update-panel a { font-size: 13px; }
+.update-panel .project-links a { color: var(--accent); }
+#updateBtn.available { color: var(--accent); background: var(--accent-soft); }
 #libInfo { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spacer { flex: 1; }
 #account { color: var(--muted); white-space: nowrap; }
@@ -3078,6 +3242,7 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
+  .appearance-panel.update-panel { position: fixed; top: 110px; left: 10px; right: 10px; width: auto; }
   body { height: auto; }
   #app { display: block; height: auto; }
   #crate { max-height: 50vh; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -3101,10 +3266,30 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 </head>
 <body>
 <header class="top">
-  <div class="brand">ib<b>fetch</b></div>
+  <div class="brand-block"><div class="brand"><img src="__IBFETCH_ICON__" alt=""><span>ib<b>fetch</b></span></div><span class="maker">by Cyberdelia</span></div>
+  <a class="powered" href="https://www.ibroadcast.com/" target="_blank" rel="noopener noreferrer" aria-label="Powered by iBroadcast">
+    <img class="powered-light" src="__POWERED_LIGHT__" alt="Powered by iBroadcast">
+    <img class="powered-dark" src="__POWERED_DARK__" alt="Powered by iBroadcast">
+  </a>
   <span id="libInfo"></span>
   <button id="refreshBtn" class="quiet" hidden title="Download the library index again">Refresh library</button>
   <span class="spacer"></span>
+  <div class="update-wrap">
+    <button id="updateBtn" class="quiet" aria-expanded="false" aria-controls="updatePanel">ibfetch __VERSION__</button>
+    <div id="updatePanel" class="appearance-panel update-panel" hidden>
+      <strong>ibfetch <span id="currentVersion">__VERSION__</span></strong>
+      <p>Independent app by Cyberdelia. Not made or endorsed by iBroadcast.</p>
+      <p id="updateStatus" role="status" aria-live="polite">Updates are checked automatically, at most once a day.</p>
+      <label class="check"><input type="checkbox" id="autoUpdates" checked> Automatically check for updates</label>
+      <div class="row-gap"><button id="checkUpdates">Check for updates</button>
+        <a id="updateLink" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Releases &amp; downloads</a></div>
+      <p>No account or library data is sent. Installation is manual; quit ibfetch before upgrading.</p>
+      <div class="row-gap project-links">
+        <a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">Tests</a>
+        <a href="https://github.com/cyberdeliaAI/ibfetch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>
+      </div>
+    </div>
+  </div>
   <div class="appearance">
     <button id="themeBtn" class="quiet" aria-expanded="false" aria-controls="themeMenu">◐ Theme ▾</button>
     <div id="themeMenu" class="appearance-panel" hidden>
@@ -3256,6 +3441,7 @@ const LETTERS = ["All", "#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 let S = null, meta = null, metaVersion = 0, settingsApplied = false, misses = 0;
 let searchGeneration = 0, sessionVersion = null, metadataLoadingVersion = null, downloadStarting = false;
+let updatePreferenceRevision = 0, updatePreferencePending = false;
 let results = [], checked = new Set(), lastClick = -1, letter = "All", activeArtist = null;
 const queue = new Map();
 const expanded = new Map();
@@ -3342,8 +3528,12 @@ function notice(text, bad = false) {
 /* polling: one loop, poll() just refreshes now */
 let stopped = false;
 async function poll() {
+  const updateRevision = updatePreferenceRevision;
   try {
-    S = await api("/api/state");
+    const data = await api("/api/state");
+    if ((updatePreferencePending || updateRevision !== updatePreferenceRevision) && S?.updates && data.updates)
+      data.updates.automatic = S.updates.automatic;
+    S = data;
     misses = 0;
     render();
   } catch (e) {
@@ -3359,12 +3549,14 @@ async function loop() {
 
 function showBye() {
   setThemeMenu(false);
+  setUpdatePanel(false);
   for (const id of ["app", "signin"]) $(id).hidden = true;
   $("bye").hidden = false;
   document.querySelectorAll(".top button, #account, #libInfo").forEach((el) => { el.hidden = true; });
 }
 
 function render() {
+  renderUpdates(S.updates);
   if (sessionVersion !== S.session) {
     sessionVersion = S.session;
     searchGeneration++;
@@ -3399,6 +3591,53 @@ function render() {
   }
   renderTransfer();
   updateDownloadButton();
+}
+
+function updateURL(data) {
+  return data?.available && /^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/.test(data.latest || "")
+    ? `https://github.com/cyberdeliaAI/ibfetch/releases/tag/v${data.latest}` : "https://github.com/cyberdeliaAI/ibfetch/releases/latest";
+}
+function renderUpdates(data) {
+  if (!data) return;
+  const available = data.available && updateURL(data).includes("/tag/");
+  $("currentVersion").textContent = data.current;
+  $("updateBtn").textContent = available ? `Update available · ${data.latest}` : `ibfetch ${data.current}`;
+  $("updateBtn").className = available ? "quiet available" : "quiet";
+  $("autoUpdates").checked = data.automatic;
+  $("checkUpdates").disabled = data.checking;
+  $("updateLink").href = updateURL(data);
+  $("updateLink").textContent = available ? `Download ${data.latest}` : "Releases & downloads";
+  $("updateStatus").textContent = data.checking ? "Checking for updates…" :
+    data.error ? (available ? `Last check failed. Last known update: ${data.latest}.` : "Could not check for updates. Try again or view GitHub releases.") :
+    available ? `Version ${data.latest} is available. You are running ${data.current}.` :
+    data.latest ? `You are running ${data.current}. Latest stable release: ${data.latest}.` :
+    data.automatic ? "Updates are checked automatically, at most once a day." : "Automatic checks are off. You can still check manually.";
+}
+function setUpdatePanel(open, focus = false) {
+  $("updatePanel").hidden = !open;
+  $("updateBtn").setAttribute("aria-expanded", String(open));
+  if (open) setThemeMenu(false);
+  if (focus) $("updateBtn").focus();
+}
+async function checkUpdates() {
+  $("checkUpdates").disabled = true;
+  try { const data = await api("/api/updates/check", {}); if (S) S.updates = data; renderUpdates(data); }
+  catch (error) { notice("Could not check for updates. Try again later.", true); }
+  finally { $("checkUpdates").disabled = !!S?.updates?.checking; }
+}
+async function saveUpdatePreference() {
+  const enabled = $("autoUpdates").checked;
+  const previous = S?.updates?.automatic;
+  updatePreferenceRevision++;
+  updatePreferencePending = true;
+  if (S?.updates) S.updates.automatic = enabled;
+  $("autoUpdates").disabled = true;
+  try {
+    const data = await api("/api/updates/settings", {automatic: enabled});
+    if (S) S.updates = data;
+    renderUpdates(data);
+  } catch (error) { if (S?.updates) S.updates.automatic = previous; renderUpdates(S?.updates); notice(error.message, true); }
+  finally { updatePreferencePending = false; updatePreferenceRevision++; $("autoUpdates").disabled = false; }
 }
 
 function renderLogin() {
@@ -3739,12 +3978,19 @@ function renderTransfer() {
 }
 
 /* events */
+$("updateBtn").addEventListener("click", () => setUpdatePanel($("updatePanel").hidden));
+$("checkUpdates").addEventListener("click", checkUpdates);
+$("autoUpdates").addEventListener("change", saveUpdatePreference);
 $("themeBtn").addEventListener("click", () => setThemeMenu($("themeMenu").hidden));
 $("appearanceChoice").addEventListener("change", changeTheme);
 $("paletteChoice").addEventListener("change", changeTheme);
-document.addEventListener("click", e => { if (!e.target.closest(".appearance")) setThemeMenu(false); });
+document.addEventListener("click", e => {
+  if (!e.target.closest(".appearance")) setThemeMenu(false);
+  if (!e.target.closest(".update-wrap")) setUpdatePanel(false);
+});
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && !$("themeMenu").hidden) { e.preventDefault(); setThemeMenu(false, true); }
+  if (e.key === "Escape" && !$("updatePanel").hidden) { e.preventDefault(); setUpdatePanel(false, true); }
 });
 if (themeMedia.addEventListener) themeMedia.addEventListener("change", showTheme);
 else themeMedia.addListener(showTheme);

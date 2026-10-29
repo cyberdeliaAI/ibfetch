@@ -13,7 +13,7 @@ let window, backend, origin, finished = false, stopping;
 
 function openExternal(value) {
   const safe = externalUrl(value);
-  if (safe) shell.openExternal(safe).catch(() => dialog.showErrorBox("Could not open iBroadcast", "Open iBroadcast's approval page in your browser."));
+  if (safe) shell.openExternal(safe).catch(() => dialog.showErrorBox("Could not open link", "Open the link in your browser."));
 }
 
 function createWindow(url) {
@@ -22,7 +22,7 @@ function createWindow(url) {
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setDevicePermissionHandler(() => false);
   ses.on("will-download", event => event.preventDefault());
-  // The renderer only needs its own loopback backend. OAuth opens in the system browser.
+  // The renderer only needs its own loopback backend. Approved links open in the system browser.
   ses.webRequest.onBeforeRequest((details, callback) => {
     let allowed = false;
     try { allowed = new URL(details.url).origin === origin; } catch { /* deny */ }

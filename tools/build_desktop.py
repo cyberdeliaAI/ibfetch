@@ -33,7 +33,7 @@ def check_app(executable, version):
         report = home / "report.json"
         settings = home / "settings"
         settings.mkdir()
-        (settings / "app-settings.json").write_text(json.dumps({"appearance":"dark", "palette":"ocean"}), encoding="utf-8")
+        (settings / "app-settings.json").write_text(json.dumps({"appearance":"dark", "palette":"ocean", "auto_updates":False}), encoding="utf-8")
         env = dict(os.environ, IBFETCH_HOME=str(home / "settings"),
                    IBFETCH_ELECTRON_PROFILE=str(home / "profile"), IBFETCH_SMOKE_REPORT=str(report))
         subprocess.run([str(executable)], env=env, check=True, timeout=90)
@@ -53,14 +53,11 @@ def main():
     node = shutil.which("node")
     if not npm or not node:
         parser.error("Node.js and npm are required only for desktop builds")
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image
     import certifi
     assets = ROOT / "build/assets"
     assets.mkdir(parents=True, exist_ok=True)
-    icon = Image.new("RGBA", (1024, 1024))
-    draw = ImageDraw.Draw(icon)
-    draw.rounded_rectangle((24, 24, 1000, 1000), radius=220, fill="#1e3027")
-    draw.text((512, 490), "ib", anchor="mm", font=ImageFont.load_default(size=530), fill="#d2e59e")
+    icon = Image.open(ROOT / "assets/ibfetch-icon.png").convert("RGBA")
     icon.save(assets / "ibfetch.png")
     icon.save(assets / "ibfetch.icns")
     icon.save(assets / "ibfetch.ico", sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])

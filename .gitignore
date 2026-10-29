@@ -13,6 +13,7 @@ electron/out/
 !.env.example
 tokens.json
 app-settings.json
+updates.json
 library-cache*
 *.part
 *.ibfetch.json

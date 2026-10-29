@@ -45,6 +45,58 @@ test("the full embedded browser script parses", () => {
   for (const source of scripts) assert.doesNotThrow(() => new vm.Script(source));
 });
 
+test("a new release is visible and its link is constructed from a stable version only", () => {
+  const h=harness();
+  h.run(`queue.set(1,{id:1,tracks:[1]}); renderUpdates({current:"1.4.0",latest:"1.5.0",available:true,
+    automatic:true,checking:false,url:"javascript:bad"});`);
+  assert.equal(h.node("updateBtn").textContent,"Update available · 1.5.0");
+  assert.equal(h.node("updateLink").href,"https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.5.0");
+  assert.equal(h.run("queue.size"),1);
+  assert.equal(h.run(`updateURL({available:true,latest:"<img onerror=bad>"})`),"https://github.com/cyberdeliaAI/ibfetch/releases/latest");
+});
+
+test("manual update checking stays busy while preserving the download list", async () => {
+  const h=harness();
+  h.run(`S={updates:{automatic:true,checking:false}}; queue.set(1,{id:1,tracks:[1]});
+    api=async()=>({current:"1.4.0",latest:null,automatic:true,checking:true});`);
+  await h.run("checkUpdates()");
+  assert.equal(h.node("checkUpdates").disabled,true);
+  assert.equal(h.run("queue.size"),1);
+  assert.equal(h.node("updateStatus").textContent,"Checking for updates…");
+});
+
+test("a stale state response cannot undo a saved automatic-update opt-out", async () => {
+  const h=harness();
+  h.run(`render=()=>{}; S={updates:{automatic:true}};
+    api=()=>new Promise(resolve=>{globalThis.finishOldPoll=resolve;});`);
+  const old=h.run("poll()");
+  h.node("autoUpdates").checked=false;
+  h.run(`api=async()=>({current:"1.4.0",automatic:false,checking:false});`);
+  await h.run("saveUpdatePreference()");
+  h.run(`finishOldPoll({updates:{automatic:true}});`);
+  await old;
+  assert.equal(h.run("S.updates.automatic"),false);
+  assert.equal(h.node("autoUpdates").checked,false);
+});
+
+test("Escape dismisses update details without losing the selection", () => {
+  const h=harness({events:true});
+  h.run(`queue.set(1,{id:1,tracks:[1]}); setThemeMenu(false); setUpdatePanel(true);`);
+  h.document.listeners.keydown({key:"Escape",preventDefault(){}});
+  assert.equal(h.node("updatePanel").hidden,true);
+  assert.equal(h.node("updateBtn").focused,true);
+  assert.equal(h.run("queue.size"),1);
+});
+
+test("failed preference changes restore the previous choice", async () => {
+  const h=harness();
+  h.run(`S={updates:{current:"1.4.0",automatic:true}}; api=async()=>{throw Error("offline")};`);
+  h.node("autoUpdates").checked=false;
+  await h.run("saveUpdatePreference()");
+  assert.equal(h.node("autoUpdates").checked,true);
+  assert.equal(h.node("autoUpdates").disabled,false);
+});
+
 test("saved theme is restored before startup without changing the queue", async () => {
   const h=harness({events:true,appearance:"dark",palette:"amber"});
   assert.equal(h.document.documentElement.dataset.theme,"dark");
