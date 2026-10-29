@@ -184,6 +184,34 @@ test("the work folder is sent with a download and restored from settings", async
   assert.equal(h.node("workBox").open,false);
 });
 
+test("the source is sent with a download, restored from settings and only offered for originals", async () => {
+  const h=harness();
+  h.run(`applySettings({out:"/x",quality:"orig",source:"stream",jobs:3,layout:"{title}",work:""});`);
+  assert.equal(h.node("source").value,"stream");
+  assert.equal(h.node("sourceField").hidden,false);
+  h.node("quality").value="320"; h.run("updateSource()");
+  assert.equal(h.node("sourceField").hidden,true);
+  h.run(`applySettings({out:"/x",quality:"orig",jobs:3,layout:"{title}",work:""});`);
+  assert.equal(h.node("source").value,"download");
+  h.run(`S={library:{state:"ready"},transfer:null}; queue.set(1,{id:1,tracks:[1]}); poll=()=>{};
+         api=async(path,body)=>{globalThis.sent={path,body}; return {tracks:1};};`);
+  await h.run("startDownload()");
+  assert.equal(h.run("sent.body.source"),"download");
+});
+
+test("downloads of unknown size show a busy bar and saved-file notes are listed", () => {
+  const h=harness();
+  h.run(`S={can_retry:false,transfer:{state:"running",total:2,done:1,bytes:5,ok:1,skip:0,fail:0,
+         active:[{name:"a.flac",received:5,expected:0},{name:"b.flac",received:5,expected:10}],recent:[],failures:[],
+         existing:[],existing_count:0,notes:[{name:"c.flac",note:"Fallback: refused"}],notes_count:1}};
+         renderTransfer();`);
+  assert.ok(h.node("tActive").innerHTML.includes('class="mini busy"'));
+  assert.ok(h.node("tActive").innerHTML.includes('class="mini"><i style="width:50%"'));
+  assert.equal(h.node("tNotes").hidden,false);
+  assert.equal(h.node("tNotes/child").textContent,"1 saved with a note: details");
+  assert.ok(h.node("tNotes/child").innerHTML.includes("Fallback: refused"));
+});
+
 test("adoption is an explicit per-start confirmation and can be declined", async () => {
   const h=harness();
   h.node("adoptFiles").checked=true;

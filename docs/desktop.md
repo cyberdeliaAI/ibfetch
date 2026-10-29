@@ -48,7 +48,7 @@ computer may prohibit unsigned apps. Do not disable system-wide protections.
 Extract and run from a graphical desktop:
 
 ```sh
-tar -xzf ibfetch-1.2.1-linux-x64.tar.gz
+tar -xzf ibfetch-1.3.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -63,20 +63,20 @@ Each release archive has a .sha256 companion. Keep both in the same folder.
 macOS:
 
 ```sh
-shasum -a 256 -c ibfetch-1.2.1-macos-arm64.zip.sha256
+shasum -a 256 -c ibfetch-1.3.0-macos-arm64.zip.sha256
 ```
 
 Linux:
 
 ```sh
-sha256sum -c ibfetch-1.2.1-linux-x64.tar.gz.sha256
+sha256sum -c ibfetch-1.3.0-linux-x64.tar.gz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\ibfetch-1.2.1-windows-x64.zip -Algorithm SHA256
-Get-Content .\ibfetch-1.2.1-windows-x64.zip.sha256
+Get-FileHash .\ibfetch-1.3.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\ibfetch-1.3.0-windows-x64.zip.sha256
 ```
 
 Compare the 64-character digest exactly. A checksum checks download integrity;

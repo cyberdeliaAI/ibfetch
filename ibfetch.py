@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+import zlib
 from collections import deque
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,7 +42,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -58,6 +60,10 @@ OAUTH_URL = f"{_base}/oauth" if _base else "https://oauth.ibroadcast.com"
 API_URL = f"{_base}/api" if _base else "https://api.ibroadcast.com"
 LIBRARY_URL = f"{_base}/library" if _base else "https://library.ibroadcast.com"
 STREAM_URL = f"{_base}/stream" if _base else "https://streaming.ibroadcast.com"
+DOWNLOAD_URL = f"{_base}/download" if _base else "https://download.ibroadcast.com/"
+# Where original files come from. The download service applies iBroadcast's current tags;
+# the streaming server returns the file exactly as uploaded and can resume it.
+SOURCES = ("download", "stream")
 
 MIME_EXT = {
     "audio/flac": "flac", "audio/x-flac": "flac", "audio/mpeg": "mp3", "audio/mp3": "mp3",
@@ -242,6 +248,21 @@ def as_json(raw):
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError, OSError, HTTPException)
 
 
+def textual(response):
+    """True for an error page or API answer rather than file data."""
+    kind = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+    return (kind.startswith("text/") or kind in ("application/json", "application/xml", "application/xhtml+xml")
+            or kind.endswith("+json"))
+
+
+class ServiceError(Exception):
+    """The download service could not deliver a track. retry: a new request may succeed."""
+
+    def __init__(self, message, retry=False):
+        super().__init__(message)
+        self.retry = retry
+
+
 def post_read(url, body, headers, timeout):
     """POST a read request (status, library). Retries temporary failures. Returns (json, raw)."""
     data = json.dumps(body).encode()
@@ -409,6 +430,31 @@ class Session:
                 return response
             response.close()
             token = self.refresh(token)
+
+    def download(self, track_id, user_id):
+        """Ask iBroadcast's download service for one track, as a streamed ZIP. The caller closes it.
+
+        This is the service behind the web player's Download Tracks. It applies the account's
+        Download Updated Metadata setting and appends an end marker after the archive.
+        """
+        token = self.token()
+        for attempt in (1, 2):
+            form = {"_user_id": text(user_id), "_token": token, "mode": "downloadlibrary",
+                    "container_type": "track", "ids": str(track_id), "end_marker": "1"}
+            response = http("POST", DOWNLOAD_URL, urllib.parse.urlencode(form).encode(),
+                            {"Content-Type": "application/x-www-form-urlencoded"}, 300)
+            code = status_of(response)
+            if code == 200 and not textual(response):
+                return response
+            with response:
+                answer = as_json(response.read(4096))
+            refused = code in (401, 403) or answer.get("authenticated") is False
+            if refused and attempt == 1:
+                token = self.refresh(token)
+                continue
+            message = text(answer.get("message")).strip()[:200] or f"HTTP {code}"
+            raise ServiceError(f"iBroadcast's download service refused it ({message})",
+                               retry=code == 429 or code >= 500)
 
 
 # -- library --------------------------------------------------------------------
@@ -777,6 +823,117 @@ def file_digest(path):
     return file_hasher(path).hexdigest()
 
 
+def resolve_source(source, quality):
+    """The download service has original files only; MP3 bitrates always stream."""
+    if source in (None, "", "auto"):
+        return "download" if quality == "orig" else "stream"
+    if source not in SOURCES:
+        raise Fail("Use download or stream as the source.")
+    if source == "download" and quality != "orig":
+        raise Fail("iBroadcast's download service only delivers original files. Use the stream source for MP3 bitrates.")
+    return source
+
+
+ZIP_TAIL = 64 * 1024  # held back while copying: the archive's directory and end marker follow the audio
+EXTENSION_ALIASES = {".aif": ".aiff", ".wave": ".wav", ".oga": ".ogg", ".mp4": ".m4a"}
+
+
+def copy_zip_entry(response, f, digest, suffix, stop, on_progress=None):
+    """Copy the one stored file of a streamed single-track ZIP into f while hashing it.
+
+    iBroadcast streams the archive: sizes and CRC-32 follow the data, then the central
+    directory and the end marker. The last ZIP_TAIL bytes are held back until the end so
+    only audio is written. Returns the audio length, or None when stopped. Raises
+    ServiceError for an unexpected or incomplete archive.
+    """
+    chunks = iter(lambda: response.read(CHUNK), b"")
+    buf = bytearray()
+
+    def need(n):
+        while len(buf) < n:
+            chunk = next(chunks, None)
+            if chunk is None:
+                raise ServiceError("the download service's ZIP ended early", retry=True)
+            buf.extend(chunk)
+
+    need(30)
+    sig, _, flags, method, _, _, crc, csize, _, nlen, xlen = struct.unpack("<IHHHHHIIIHH", bytes(buf[:30]))
+    if sig != 0x04034B50:
+        raise ServiceError("the download service didn't return a ZIP archive")
+    if method != 0 or flags & 1:
+        raise ServiceError("the download service returned a compressed or encrypted ZIP entry")
+    need(30 + nlen + xlen)
+    raw_name = bytes(buf[30:30 + nlen])
+    name = raw_name.decode("utf-8" if flags & 0x800 else "cp437", "replace")
+    archived_suffix = Path(name.replace("\\", "/")).suffix.lower()
+    if EXTENSION_ALIASES.get(archived_suffix, archived_suffix) != EXTENSION_ALIASES.get(suffix.lower(), suffix.lower()):
+        raise ServiceError(f"the download service returned {Path(name).suffix or 'a file without extension'}, "
+                           f"not {suffix}")
+    start = 30 + nlen + xlen
+    del buf[:start]
+    written, crc_now = 0, 0
+    first = True
+    while True:
+        chunk = b"" if first else next(chunks, None)
+        first = False
+        if chunk is None:
+            break
+        if stop.is_set():
+            return None
+        buf.extend(chunk)
+        if len(buf) > ZIP_TAIL:
+            data = bytes(buf[:-ZIP_TAIL])
+            del buf[:-ZIP_TAIL]
+            f.write(data)
+            digest.update(data)
+            crc_now = zlib.crc32(data, crc_now)
+            written += len(data)
+            if on_progress:
+                on_progress(written, 0, len(data))
+
+    tail = bytes(buf)
+    if not tail.endswith(b"EOF\n"):
+        raise ServiceError("the download service stopped before its end marker", retry=True)
+    tail = tail[:-4]
+    end = tail.rfind(b"PK\x05\x06")
+    if end < 0 or len(tail) - end < 22:
+        raise ServiceError("the download service's ZIP has no directory", retry=True)
+    _, disk, cd_disk, here, total, cd_size, cd_offset, comment = struct.unpack("<IHHHHIIH", tail[end:end + 22])
+    if end + 22 + comment != len(tail) or disk or cd_disk:
+        raise ServiceError("the download service returned an unexpected ZIP layout")
+    if here != 1 or total != 1:
+        raise ServiceError("the download service returned more than one file")
+    cd = cd_offset - (start + written)  # tail-relative position of the central directory
+    if cd_offset == 0xFFFFFFFF or cd < 0 or cd + cd_size != end or cd_size < 46:
+        raise ServiceError("the download service returned an unexpected ZIP layout")
+    (csig, _, _, _, cmethod, _, _, ccrc, ccsize, cusize, cnlen, _, _, _, _, _,
+     local) = struct.unpack("<IHHHHHHIIIHHHHHII", tail[cd:cd + 46])
+    if csig != 0x02014B50 or cmethod != 0 or local != 0 or ccsize != cusize or tail[cd + 46:cd + 46 + cnlen] != raw_name:
+        raise ServiceError("the download service's ZIP directory doesn't match its file")
+    data_end = cd
+    if flags & 8:  # a data descriptor follows the data, with or without its signature
+        for size_of in (16, 12):
+            fields = tail[cd - 12:cd] if cd >= size_of else b""
+            signed = size_of == 12 or tail[cd - 16:cd - 12] == b"PK\x07\x08"
+            if len(fields) == 12 and signed and struct.unpack("<III", fields) == (ccrc, ccsize, cusize):
+                data_end = cd - size_of
+                break
+        else:
+            raise ServiceError("the download service's ZIP sizes don't match", retry=True)
+    elif (crc, csize) != (ccrc, ccsize):
+        raise ServiceError("the download service's ZIP sizes don't match", retry=True)
+    data = tail[:data_end]
+    f.write(data)
+    digest.update(data)
+    crc_now = zlib.crc32(data, crc_now)
+    written += len(data)
+    if on_progress and data:
+        on_progress(written, 0, len(data))
+    if written != ccsize or crc_now != ccrc:
+        raise ServiceError("the downloaded file failed the ZIP's CRC-32 check", retry=True)
+    return written
+
+
 class TargetBusy(Fail):
     pass
 
@@ -1007,14 +1164,17 @@ def check_work_folder(work, out):
 
 
 def fetch_track(session, lib, out, rel, path, track_id, stop, on_progress=None, quality="orig",
-                verify=False, adopt_existing=False, locks=None, work=None):
+                verify=False, adopt_existing=False, locks=None, work=None, source="stream"):
+    """source: "download" for iBroadcast's download service, "stream" for the streaming server."""
+    if source not in SOURCES or (source == "download" and quality != "orig"):
+        raise ValueError("the download service only provides original files")
     try:
         with target_lock(out, rel, stop, locks):
             if work:
                 return _fetch_via_work(session, lib, out, rel, path, track_id, stop, on_progress,
-                                       quality, verify, adopt_existing, Path(work), locks)
+                                       quality, verify, adopt_existing, Path(work), locks, source)
             return _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress,
-                                quality, verify, adopt_existing, locks)
+                                quality, verify, adopt_existing, locks, source)
     except TargetBusy as error:
         if stop.is_set():
             return "stopped", 0, ""
@@ -1027,8 +1187,14 @@ def _same_track(record, lib, track_id, quality):
             and recorded.get("track_id") == track_id and recorded.get("quality") == quality)
 
 
+def record_note(record):
+    """Only our saved fallback notice is a success note; other text never authorizes a move."""
+    note = record.get("note")
+    return note if isinstance(note, str) and note.startswith("Fallback:") else ""
+
+
 def _fetch_via_work(session, lib, out, rel, path, track_id, stop, on_progress, quality,
-                    verify, adopt_existing, work, locks):
+                    verify, adopt_existing, work, locks, source="stream"):
     """Download into a local work folder, then move each complete, hashed file to out."""
     target = out / rel
     local_out = work_root(work, out)
@@ -1039,18 +1205,24 @@ def _fetch_via_work(session, lib, out, rel, path, track_id, stop, on_progress, q
         if recovered:
             return recovered
         result = _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress,
-                              quality, verify, adopt_existing, locks)
-        if result == ("skip", 0, ""):
+                              quality, verify, adopt_existing, locks, source)
+        if result[0] == "skip" and (not result[2] or result[2].startswith("Fallback:")):
             note = _discard_moved_copy(target, local, local_record, local_out)
-            if note:
-                return "skip", 0, note
+            return "skip", 0, " ".join(n for n in (result[2], note) if n)
         return result
     state, nbytes, note = _fetch_track(session, lib, local_out, rel, path, track_id, stop,
-                                       on_progress, quality, verify=verify, locks=locks)
-    if state == "skip" and note and not note.startswith("Recovered:"):
+                                       on_progress, quality, verify=verify, locks=locks, source=source)
+    if state == "skip" and note and not note.startswith(("Recovered:", "Fallback:")):
         return "fail", 0, f"the copy in the work folder can't be moved: {note}"
     if state not in ("ok", "skip"):
         return state, nbytes, note
+    record = read_object(local_record)
+    saved_note = record_note(record)
+    if (not saved_note and source == "download" and not record.get("adopted")
+            and record.get("identity", {}).get("route") == "stream"):
+        saved_note = ("Fallback: the copy in the work folder was fetched by streaming; "
+                      "saved with the tags as uploaded, without iBroadcast's tag edits.")
+        write_private(local_record, json.dumps({**record, "note": saved_note}).encode())
     try:
         moved = _move_to_output(local, local_record, target, local_out)
     except Fail as error:
@@ -1058,7 +1230,7 @@ def _fetch_via_work(session, lib, out, rel, path, track_id, stop, on_progress, q
     except OSError as error:
         return "fail", 0, ("downloaded to the work folder, but moving it failed "
                            f"({error.strerror or error}); it stays there and moves on the next run")
-    return "ok", moved, ""
+    return "ok", moved, saved_note or (note if state == "ok" else "")
 
 
 def _move_to_output(local, local_record, target, local_out):
@@ -1081,26 +1253,40 @@ def _move_to_output(local, local_record, target, local_out):
     # Network shares may set their own timestamp on rename; the baseline uses the final one.
     write_private(DownloadRecord(target, local_record.locks), json.dumps({
         "identity": record["identity"], "size": moved.st_size, "mtime_ns": moved.st_mtime_ns,
-        "sha256": record["sha256"], "adopted": False}).encode())
+        "sha256": record["sha256"], "adopted": bool(record.get("adopted")),
+        **({"note": record_note(record)} if record_note(record) else {})}).encode())
     _remove_local_copy(local, local_record, local_out)
     return moved.st_size
 
 
 def _recover_move(lib, track_id, quality, target, local, local_record, local_out):
-    """A move that stopped after the rename leaves no record at the target: restore it."""
+    """Restore a move interrupted after rename, including replacement of an old baseline."""
     target_record = DownloadRecord(target, local_record.locks)
-    if target_record.exists() or not local.exists():
+    if not local.exists():
         return None
     record = read_object(local_record)
+    existing = read_object(target_record)
     info = target.stat()
+    if target_record.exists():
+        if not _same_track(existing, lib, track_id, quality):
+            return None
+        if (existing.get("sha256") == record.get("sha256") and existing.get("size") == record.get("size") == info.st_size
+                and existing.get("mtime_ns") == info.st_mtime_ns and record_note(existing) == record_note(record)
+                and existing.get("identity") == record.get("identity")):
+            return None  # already registered; the normal stat/verify path handles it
     if (not _same_track(record, lib, track_id, quality) or record.get("size") != info.st_size
             or local.stat().st_size != info.st_size or record.get("sha256") != file_digest(target)):
         return None
+    after = target.stat()
+    if (after.st_size, after.st_mtime_ns) != (info.st_size, info.st_mtime_ns):
+        return "skip", 0, "Modified: file changed during move recovery; preserved."
     write_private(target_record, json.dumps({
         "identity": record["identity"], "size": info.st_size, "mtime_ns": info.st_mtime_ns,
-        "sha256": record["sha256"], "adopted": False}).encode())
+        "sha256": record["sha256"], "adopted": bool(record.get("adopted")),
+        **({"note": record_note(record)} if record_note(record) else {})}).encode())
     note = _discard_moved_copy(target, local, local_record, local_out)
-    return "skip", 0, "Recovered: an interrupted move from the work folder was completed." + (" " + note if note else "")
+    return "skip", 0, " ".join(n for n in ("Recovered: an interrupted move from the work folder was completed.",
+                                          record_note(record), note) if n)
 
 
 def _discard_moved_copy(target, local, local_record, local_out):
@@ -1149,27 +1335,33 @@ def _remove_local_copy(local, local_record, local_out):
 
 
 def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, quality,
-                 verify=False, adopt_existing=False, locks=None):
-    """Download one file to out/rel, resuming a .part file.
+                 verify=False, adopt_existing=False, locks=None, source="stream"):
+    """Download one file to out/rel, from the download service or by streaming.
 
     Returns (state, bytes, note) with state ok, skip, fail or stopped.
-    on_progress(received, expected, new_bytes) is called while data arrives.
+    on_progress(received, expected, new_bytes) is called while data arrives;
+    expected is 0 when the size isn't known in advance.
     The SHA-256 is computed while the data arrives, so completion never reads
     the file again; a resumed .part is read once to continue its checksum.
+    Only the streaming server resumes a .part. The download service starts each
+    attempt over, and falls back to streaming when it can't deliver the file.
     """
     final = out / rel
     record_path = DownloadRecord(final, locks)
     part = final.with_name(final.name + ".part")
     part_record = DownloadRecord(final, locks, partial=True)
+    # "route" tells how the bytes were fetched. Completed files match without it, so a
+    # track saved by either route is skipped; partial files must match it to resume.
     identity = {"version": 1, "user_id": text(lib.user_id), "track_id": track_id,
-                "quality": quality, "source": text(lib.tracks.get(track_id, "file"))}
+                "quality": quality, "source": text(lib.tracks.get(track_id, "file")), "route": source}
 
-    def save_record(digest, adopted=False, expected=None):
+    def save_record(digest, adopted=False, expected=None, note="", provenance=None):
         info = final.stat()
         if expected and (info.st_size, info.st_mtime_ns) != (expected.st_size, expected.st_mtime_ns):
             return False
-        write_private(record_path, json.dumps({"identity": identity, "size": info.st_size,
-                      "mtime_ns": info.st_mtime_ns, "sha256": digest, "adopted": adopted}).encode())
+        write_private(record_path, json.dumps({"identity": provenance if provenance is not None else identity,
+                      "size": info.st_size, "mtime_ns": info.st_mtime_ns, "sha256": digest, "adopted": adopted,
+                      **({"note": note} if note else {})}).encode())
         return True
 
     def matches(record):
@@ -1196,16 +1388,23 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
         # A completion receipt was saved before rename. A partial identity alone is
         # insufficient: validate the completed length and checksum before recovery.
         pending = read_object(part_record)
-        if (not record_path.exists() and not part.exists() and pending.get("completed") is True
+        unchanged = matching and record.get("size") == info.st_size and record.get("mtime_ns") == info.st_mtime_ns
+        registered_pending = (unchanged and pending.get("sha256") == record.get("sha256")
+                              and pending.get("size") == record.get("size")
+                              and pending.get("identity") == record.get("identity")
+                              and record_note(pending) == record_note(record))
+        if ((not record_path.exists() or matching) and not registered_pending
+                and not part.exists() and pending.get("completed") is True
                 and matches(pending) and pending.get("size") == info.st_size
                 and pending.get("sha256") == file_digest(final)):
-            if not save_record(pending["sha256"], expected=info):
+            if not save_record(pending["sha256"], expected=info, note=record_note(pending), provenance=pending["identity"]):
                 return "skip", 0, "Modified: file changed during crash recovery; preserved."
             part_record.unlink()
-            return "skip", 0, "Recovered: completed download receipt restored after interruption."
-        unchanged = matching and record.get("size") == info.st_size and record.get("mtime_ns") == info.st_mtime_ns
+            return "skip", 0, "Recovered: completed download receipt restored after interruption." + (
+                " " + record_note(pending) if record_note(pending) else "")
         if adopt_existing and not unchanged:
-            if not save_record(file_digest(final), adopted=True, expected=info):
+            if not save_record(file_digest(final), adopted=True, expected=info,
+                               note=record_note(record), provenance=recorded if matching else None):
                 return "skip", 0, "Modified: file changed during adoption; baseline left unchanged."
             return "skip", 0, "Adopted: existing file accepted as a local baseline, not remotely verified."
         if not matching:
@@ -1213,21 +1412,35 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
         if verify:
             if record.get("sha256") != file_digest(final):
                 return "skip", 0, "Modified: checksum differs from the saved baseline; preserved."
-            if not save_record(record["sha256"], adopted=bool(record.get("adopted")), expected=info):
+            if not save_record(record["sha256"], adopted=bool(record.get("adopted")), expected=info,
+                               note=record_note(record), provenance=recorded):
                 return "skip", 0, "Modified: file changed during verification; baseline left unchanged."
             cleanup_pending(record)
-            return "skip", 0, ""
+            return "skip", 0, record_note(record)
         if unchanged:
             cleanup_pending(record)
-            return "skip", 0, ""
+            return "skip", 0, record_note(record)
         if "mtime_ns" not in record:
             return "skip", 0, "Unverified: older record needs full verification or explicit adoption; preserved."
         return "skip", 0, "Modified: local size or modification time changed; preserved."
-    if not path:
-        return "fail", 0, "no stream path in the library, try refreshing the library"
     final.parent.mkdir(parents=True, exist_ok=True)
-    if part.exists() and read_object(part_record).get("identity") != identity:
-        return "fail", 0, "partial file has no matching download record; choose another folder"
+
+    def without_route(value):
+        return {k: v for k, v in value.items() if k != "route"} if isinstance(value, dict) else None
+
+    def discard_part():
+        for leftover in (part, part_record):
+            try:
+                leftover.unlink()
+            except FileNotFoundError:
+                pass
+
+    if part.exists():
+        recorded = read_object(part_record).get("identity")
+        if without_route(recorded) != without_route(identity):
+            return "fail", 0, "partial file has no matching download record; choose another folder"
+        if source == "download" or recorded.get("route", "stream") != "stream":
+            discard_part()  # this track's own incomplete download; only a streamed one can resume
 
     hashing = {"state": None, "length": 0}  # checksum of the bytes written to .part so far
 
@@ -1237,23 +1450,66 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
             hashing["length"] = part.stat().st_size if length else 0
         return hashing["state"]
 
-    def finish():
+    def finish(note=""):
         length = part.stat().st_size
         if not length:
             return "fail", 0, "iBroadcast returned an empty audio file"
         digest = checksum_for(length).hexdigest()
         write_private(part_record, json.dumps({"identity": identity, "completed": True,
-                      "size": length, "sha256": digest}).encode())
+                      "size": length, "sha256": digest, **({"note": note} if note else {})}).encode())
         os.replace(part, final)
         # Network shares may give the renamed file their own timestamp. The content was
         # hashed as it was written under this target's lock, so size and the final stat
         # are the baseline; reading the whole file again would only double the traffic.
         renamed = final.stat()
-        if renamed.st_size != length or not save_record(digest, expected=renamed):
+        if renamed.st_size != length or not save_record(digest, expected=renamed, note=note):
             return "fail", 0, "file changed locally during completion; preserved without a new baseline"
         part_record.unlink()
-        return "ok", length, ""
+        return "ok", length, note
 
+    fallback = service_note = ""
+    if source == "download":
+        note = "failed"
+        for attempt in range(3):
+            if stop.is_set() or (attempt and stop.wait(3 * attempt)):
+                return "stopped", 0, ""
+            try:
+                response = session.download(track_id, lib.user_id)
+            except ServiceError as error:
+                note = str(error)
+                if error.retry:
+                    continue
+                break
+            except NETWORK_ERRORS as error:
+                note = f"network error ({error.__class__.__name__})"
+                continue
+            digest = hashlib.sha256()
+            try:
+                with response:
+                    write_private(part_record, json.dumps({"identity": identity}).encode())
+                    with open(part, "wb") as f:
+                        length = copy_zip_entry(response, f, digest, final.suffix, stop, on_progress)
+            except ServiceError as error:
+                note = str(error)
+                if error.retry:
+                    continue
+                break
+            except NETWORK_ERRORS as error:
+                note = f"connection dropped ({error.__class__.__name__})"
+                continue
+            if length is None:
+                return "stopped", 0, ""
+            hashing["state"], hashing["length"] = digest, length
+            return finish()
+        # The streaming server still has the original upload: finish the track from there.
+        service_note = note
+        fallback = f"Fallback: {note}; saved the file as uploaded, without iBroadcast's tag edits."
+        identity = dict(identity, route="stream")
+        discard_part()
+        hashing["state"], hashing["length"] = None, 0
+
+    if not path:
+        return "fail", 0, "no stream path in the library, try refreshing the library"
     note = "failed"
     for attempt in range(4):
         if stop.is_set():
@@ -1271,7 +1527,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
             if code == 416 and offset:
                 total = re.fullmatch(r"bytes \*/(\d+)", response.headers.get("Content-Range") or "")
                 if total and int(total.group(1)) == offset:
-                    return finish()
+                    return finish(fallback)
                 return "fail", 0, "server range does not confirm the partial file is complete"
             if code in (401, 403):
                 return "fail", 0, f"iBroadcast refused it (HTTP {code}), refresh the library or sign in again"
@@ -1280,8 +1536,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
             if code not in (200, 206):
                 note = f"HTTP {code}"
                 continue
-            kind = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
-            if kind.startswith("text/") or kind in ("application/json", "application/xml", "application/xhtml+xml") or kind.endswith("+json"):
+            if textual(response):
                 return "fail", 0, "iBroadcast returned a non-audio response"
             if code == 200:
                 offset = 0  # the server sent the whole file, start over
@@ -1325,7 +1580,9 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
         if total and offset + received < total:
             note = "server returned only part of the remaining file"
             continue
-        return finish()
+        return finish(fallback)
+    if fallback:
+        return "fail", 0, f"{service_note}; streaming also failed: {note}"
     return "fail", 0, note
 
 
@@ -1334,10 +1591,10 @@ class Transfer:
 
     def __init__(self, session, lib, jobs, out, workers, on_item=None, quality="orig",
                  verify=False, adopt_existing=False, prepare=None, total=None, valid=None,
-                 locks=None, work=None):
+                 locks=None, work=None, source="stream"):
         self.session, self.lib, self.jobs, self.out = session, lib, jobs, out
         self.workers, self.on_item = workers, on_item
-        self.quality = quality
+        self.quality, self.source = quality, source
         self.locks, self.work = locks, work
         self.verify, self.adopt_existing = verify, adopt_existing
         self.prepare, self.valid = prepare, valid
@@ -1350,6 +1607,7 @@ class Transfer:
         self.live = {}        # rel -> [received, expected]
         self.failures = []
         self.existing = []
+        self.notes = []       # saved files with a remark, such as a streaming fallback
         self.recent = deque(maxlen=40)
         self.samples = deque()
         self.futures = []
@@ -1361,10 +1619,12 @@ class Transfer:
             with self.lock:
                 self.live[rel] = [received, expected]
                 self.moved += new
+        with self.lock:  # visible while the download service prepares the file
+            self.live[rel] = [0, 0]
         try:
             return fetch_track(self.session, self.lib, self.out, rel, path, track_id, self.stop,
                                progress, self.quality, self.verify, self.adopt_existing,
-                               self.locks, self.work)
+                               self.locks, self.work, self.source)
         except Fail as error:
             return "fail", 0, str(error)
         except Exception as error:  # one bad file shouldn't stop the rest
@@ -1384,6 +1644,8 @@ class Transfer:
                 self.failures.append({"name": str(rel), "note": note})
             if state == "skip" and note:
                 self.existing.append({"name": str(rel), "note": note})
+            if state == "ok" and note:
+                self.notes.append({"name": str(rel), "note": note})
             self.recent.appendleft({"name": str(rel), "state": state, "bytes": nbytes, "note": note})
             done = self.done
         if self.on_item:
@@ -1446,6 +1708,7 @@ class Transfer:
                 "active": [{"name": str(k), "received": v[0], "expected": v[1]} for k, v in self.live.items()],
                 "recent": list(self.recent)[:12], "failures": self.failures[-200:],
                 "existing": self.existing[-200:], "existing_count": len(self.existing),
+                "notes": self.notes[-200:], "notes_count": len(self.notes), "source": self.source,
             }
 
 
@@ -1457,17 +1720,18 @@ def run_downloads(session, lib, groups, args, home=None):
         if not work.is_absolute():
             raise Fail("Use a full path for --work-folder, like ~/ibfetch-work.")
         check_work_folder(work, out)
+    source = resolve_source(getattr(args, "source", None), args.quality)
     jobs = plan_jobs(lib, groups, args.quality, Layout(args.layout))
     width = len(str(len(jobs)))
 
     def report(done, total, state, rel, nbytes, note):
         label = {"ok": "ok  ", "skip": "skip", "fail": "FAIL"}[state]
-        extra = f"  {size(nbytes)}" if state == "ok" else f"  {note}" if note else ""
+        extra = (f"  {size(nbytes)}" + (f"  {note}" if note else "")) if state == "ok" else f"  {note}" if note else ""
         print(f"[{done:>{width}}/{total}] {label} {rel}{extra}", flush=True)
 
     transfer = Transfer(session, lib, jobs, out, args.jobs, on_item=report, quality=args.quality,
                         verify=args.verify, adopt_existing=args.adopt_existing,
-                        locks=lock_folder(home) if home is not None else None, work=work)
+                        locks=lock_folder(home) if home is not None else None, work=work, source=source)
     transfer.run()
     if transfer.state == "stopped":
         print("\nStopped. Run the same command again to pick up where it left off.", file=sys.stderr)
@@ -1482,6 +1746,10 @@ def run_downloads(session, lib, groups, args, home=None):
         print("Existing files: " + ", ".join(f"{count} {label.lower()}" for label, count in notes.items() if count) + ".")
     if notes["Unverified"] or notes["Modified"]:
         print("Audio preserved. Use --verify to check a saved checksum, or --adopt-existing only to trust a local baseline.")
+    if transfer.notes:
+        count = len(transfer.notes)
+        print(f"{count} track{'s' if count != 1 else ''} came from the streaming server, with the tags as uploaded, "
+              "not iBroadcast's edits. See the notes for the reason.")
     if transfer.failures:
         print("\nFailed:")
         for item in transfer.failures[:50]:
@@ -1596,6 +1864,7 @@ def cmd_list(args, home):
 def cmd_get(args, home):
     if args.quality not in QUALITIES:
         raise Fail(f"Use one of these qualities: {', '.join(QUALITIES)}")
+    source = resolve_source(args.source, args.quality)
     session = Session(home)
     lib = load_library(session, home, args.refresh)
     if args.quality != "128" and not lib.premium and not args.dry_run:
@@ -1615,7 +1884,9 @@ def cmd_get(args, home):
         if input("Download them all? [y/N] ").strip().lower() not in ("y", "yes", "j", "ja"):
             print("Nothing downloaded.")
             return 1
-    print(f"Downloading {total} tracks from {len(groups)} albums ({args.quality}, {args.jobs} at a time).")
+    via = {"download": "iBroadcast's download service, with its current tags",
+           "stream": "the streaming server, as uploaded"}[source] if args.quality == "orig" else args.quality
+    print(f"Downloading {total} tracks from {len(groups)} albums ({via}, {args.jobs} at a time).")
     if args.work_folder:
         print(f"Each finished track moves from the work folder {Path(args.work_folder).expanduser()} to {Path(args.out).expanduser()}.")
     print()
@@ -1722,7 +1993,7 @@ class App:
         self.transfer = None
         self.last_items = []
         self.last_options = {}
-        self.settings = {"out": str(Path.home() / "Music" / "iBroadcast"), "quality": "orig",
+        self.settings = {"out": str(Path.home() / "Music" / "iBroadcast"), "quality": "orig", "source": "download",
                          "jobs": 3, "layout": DEFAULT_LAYOUT, "work": "", "appearance": "auto", "palette": "forest"}
         saved = read_object(home / "app-settings.json")
         for key in ("out", "layout"):
@@ -1732,6 +2003,8 @@ class App:
             self.settings["work"] = saved["work"].strip()
         if saved.get("quality") in QUALITIES:
             self.settings["quality"] = saved["quality"]
+        if saved.get("source") in SOURCES:
+            self.settings["source"] = saved["source"]
         if type(saved.get("jobs")) is int and 1 <= saved["jobs"] <= 8:
             self.settings["jobs"] = saved["jobs"]
         if saved.get("appearance") in ("auto", "light", "dark"):
@@ -1901,6 +2174,11 @@ class App:
                 raise Fail("Pick one of the listed qualities.")
             if quality != "128" and not lib.premium:
                 raise Fail("Original files and bitrates other than 128 need iBroadcast Premium. Pick MP3 128 kbps.")
+            # The source only applies to original files; the setting is kept for the next time.
+            chosen = text(body.get("source") or "download")
+            if chosen not in SOURCES:
+                raise Fail("Pick one of the listed sources.")
+            source = resolve_source(chosen if quality == "orig" else "stream", quality)
             jobs = number(body.get("jobs")) or 3
             if not 1 <= jobs <= 8:
                 raise Fail("Use 1 to 8 parallel downloads.")
@@ -1943,12 +2221,12 @@ class App:
             transfer = Transfer(session, lib, [], out, jobs, quality=quality, prepare=prepare,
                                 total=total, valid=valid, verify=body.get("verify") is True,
                                 adopt_existing=body.get("adopt_existing") is True,
-                                locks=lock_folder(self.home), work=work)
+                                locks=lock_folder(self.home), work=work, source=source)
             with self.lock:
                 self.transfer = transfer
                 self.last_items = body.get("items") or []
                 self.last_options = {"verify": body.get("verify") is True}
-                self.settings.update({"out": out_text, "quality": quality, "jobs": jobs,
+                self.settings.update({"out": out_text, "quality": quality, "source": chosen, "jobs": jobs,
                                       "layout": layout.template, "work": work_text})
             try:
                 write_private(self.home / "app-settings.json", json.dumps(self.settings, indent=2).encode())
@@ -2238,7 +2516,10 @@ def build_parser():
     add_filters(p)
     p.add_argument("-o", "--out", default="iBroadcast", help="download folder (default: ./iBroadcast)")
     p.add_argument("-q", "--quality", default="orig", choices=QUALITIES,
-                   help="orig = the file you uploaded (default), or an MP3 bitrate")
+                   help="orig = uploaded format using the selected source (default), or an MP3 bitrate")
+    p.add_argument("--source", choices=SOURCES,
+                   help="for original files: download = iBroadcast's download service, faster and with the tags "
+                        "you edited in iBroadcast (default); stream = the file exactly as uploaded, resumable")
     p.add_argument("-j", "--jobs", type=int, default=3, choices=range(1, 9), metavar="1-8",
                    help="parallel downloads (default 3)")
     p.add_argument("--layout", default=DEFAULT_LAYOUT,
@@ -2727,6 +3008,7 @@ a.button {
 .q-x:hover { color: var(--red); }
 .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .settings .wide { grid-column: 1 / -1; }
+.source-help { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 .field .folder, details .folder { display: flex; gap: 6px; }
 details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
@@ -2762,6 +3044,8 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 .active .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .mini { height: 3px; background: var(--line); border-radius: 2px; margin-top: 3px; overflow: hidden; }
 .mini i { display: block; height: 100%; background: var(--accent-fill); }
+.mini.busy i { width: 35% !important; animation: busy 1.4s ease-in-out infinite alternate; }
+@keyframes busy { from { transform: translateX(0); } to { transform: translateX(186%); } }
 .recent { list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
 .recent li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; }
 .recent .st { display: inline-block; width: 86px; color: var(--ink); }
@@ -2801,6 +3085,7 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lamp.on { animation: none; }
+  .mini.busy i { animation: none; width: 100% !important; opacity: .45; }
   .meter .fill { transition: none; }
 }
 </style>
@@ -2899,6 +3184,11 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
       </label>
       <label class="field"><span>Quality</span><select id="quality"></select></label>
       <label class="field"><span>At the same time</span><select id="jobs"></select></label>
+      <label class="field wide" id="sourceField"><span>Original files from</span><select id="source">
+        <option value="download">Download service: faster, your edits</option>
+        <option value="stream">Streaming: exactly as uploaded</option>
+      </select><p class="source-help">Updated tags require Download Updated Metadata to be enabled in iBroadcast.
+        Existing files are preserved when you change source.</p></label>
       <details class="wide">
         <summary>Folder and file names</summary>
         <input id="layout" type="text" spellcheck="false" aria-label="Folder and file names" style="margin-top:6px">
@@ -2936,6 +3226,7 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
       <ul class="recent" id="tRecent" style="margin-top:10px"></ul>
       <details class="fails" id="tFails" hidden><summary></summary><ul></ul></details>
       <details class="fails" id="tExisting" hidden><summary></summary><ul></ul></details>
+      <details class="fails" id="tNotes" hidden><summary></summary><ul></ul></details>
     </section>
   </aside>
 </main>
@@ -3095,6 +3386,7 @@ function render() {
     $("premiumNote").hidden = !free;
     for (const opt of $("quality").options) opt.disabled = free && opt.value !== "128";
     if (free && $("quality").value !== "128") $("quality").value = "128";
+    updateSource();
   }
   renderTransfer();
   updateDownloadButton();
@@ -3360,6 +3652,13 @@ function applySettings(s) {
   $("layout").value = s.layout;
   $("workDir").value = s.work || "";
   $("workBox").open = !!s.work;
+  $("source").value = s.source === "stream" ? "stream" : "download";
+  updateSource();
+}
+
+/* The download service only has original files; bitrates always stream. */
+function updateSource() {
+  $("sourceField").hidden = $("quality").value !== "orig";
 }
 
 async function startDownload() {
@@ -3375,6 +3674,7 @@ async function startDownload() {
       items: [...queue.values()].map((a) => ({ album_id: a.id, tracks: a.tracks })),
       out: $("outDir").value, quality: $("quality").value, jobs: Number($("jobs").value), layout: $("layout").value,
       verify: $("verifyFiles").checked, adopt_existing: $("adoptFiles").checked, work: $("workDir").value,
+      source: $("source").value,
     });
   } catch (e) { notice(e.message, true); return; }
   finally { downloadStarting = false; updateDownloadButton(); }
@@ -3405,7 +3705,7 @@ function renderTransfer() {
   $("retryBtn").hidden = running || !(t.fail || t.state === "stopped") || !S.can_retry;
   $("retryBtn").textContent = t.state === "stopped" ? "Carry on" : "Retry failed";
   $("tActive").innerHTML = running ? t.active.map((a) =>
-    `<li><span class="nm">${esc(base(a.name))}</span><div class="mini"><i style="width:${a.expected ? Math.min(100, a.received / a.expected * 100) : 0}%"></i></div></li>`).join("") : "";
+    `<li><span class="nm">${esc(base(a.name))}</span><div class="mini${a.expected ? "" : " busy"}"><i style="width:${a.expected ? Math.min(100, a.received / a.expected * 100) : 0}%"></i></div></li>`).join("") : "";
   const label = { ok: "Saved", skip: "Skipped", fail: "Failed" };
   $("tRecent").innerHTML = t.recent.slice(0, running ? 6 : 4).map((r) =>
     `<li title="${esc(r.name)}${r.note ? `: ${esc(r.note)}` : ""}"><span class="st ${r.state === "fail" ? "fail" : ""}">${label[r.state]}</span>${esc(base(r.name))}</li>`).join("");
@@ -3420,6 +3720,12 @@ function renderTransfer() {
   if (notes.length) {
     existing.querySelector("summary").textContent = `${num(t.existing_count)} existing file${t.existing_count === 1 ? "" : "s"}: details`;
     existing.querySelector("ul").innerHTML = notes.map(f => `<li>${esc(f.name)}: ${esc(f.note)}</li>`).join("");
+  }
+  const remarks = $("tNotes"), saved = t.notes || [];
+  remarks.hidden = !saved.length;
+  if (saved.length) {
+    remarks.querySelector("summary").textContent = `${num(t.notes_count)} saved with a note: details`;
+    remarks.querySelector("ul").innerHTML = saved.map(f => `<li>${esc(f.name)}: ${esc(f.note)}</li>`).join("");
   }
 }
 
@@ -3545,6 +3851,7 @@ async function chooseFolderInto(input, button) {
 }
 $("chooseBtn").addEventListener("click", () => chooseFolderInto("outDir", "chooseBtn"));
 $("chooseWorkBtn").addEventListener("click", () => chooseFolderInto("workDir", "chooseWorkBtn"));
+$("quality").addEventListener("change", updateSource);
 $("downloadBtn").addEventListener("click", startDownload);
 $("stopBtn").addEventListener("click", async () => { await api("/api/cancel", {}).catch((e) => notice(e.message, true)); poll(); });
 $("openBtn").addEventListener("click", async () => {

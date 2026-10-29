@@ -7,33 +7,38 @@ Download a chosen part of your iBroadcast library. All albums by one artist, eve
 
 - Standalone apps for macOS, Windows and Linux, plus Python/browser and terminal use.
 - One Python file, no packages to install. Python 3.8 or newer on Linux, macOS or Windows.
-- Original files by default (FLAC stays FLAC), or MP3 at 96 to 320 kbps.
-- Safe to stop and start again. Verified finished files are skipped and matching partial files resume.
+- Original files by default (FLAC stays FLAC), with the tags you edited in iBroadcast, or MP3 at 96 to 320 kbps.
+- Safe to stop and start again. Finished files are skipped; an interrupted track downloads again.
 - Signs in through iBroadcast's own approval page. ibfetch never sees your password.
 
 Original files and bitrates other than 128 need iBroadcast Premium. Free accounts can use MP3 128 kbps.
 
 ## File metadata
 
-**ibfetch currently downloads from iBroadcast's streaming service, not its metadata-updated
-export service.** With Original file, embedded audio tags remain as originally uploaded.
-Names and folders can use your current iBroadcast library data, so they may differ from
-those embedded tags. The iBroadcast setting **Download Updated Metadata** applies to its
-web player's Download Tracks and MediaSync Lite's Download Library, and is not applied
-by ibfetch. The hidden JSON manifest records download identity/integrity; it does not
-write tags or artwork into music. Use iBroadcast's export if you need its updated tags.
-See [iBroadcast's export guide](https://help.ibroadcast.com/exporting-library).
+Original files come from **iBroadcast's download service** by default, the same service
+behind the web player's Download Tracks and MediaSync Lite's Download Library. With your
+account's **Download Updated Metadata** setting on, it writes the tags you edited in
+iBroadcast into each file: title, artists, album, year and genre. In testing it was also
+about three times faster than the streaming server (6.3 against 1.8 MB/s per track).
 
-## Screenshots
+iBroadcast rebuilds each file to do this. FLAC stays lossless: the bytes differ from
+your upload, but in testing the decoded audio was identical. Some tag details come from
+iBroadcast's service, not from ibfetch:
 
-Demonstration library with a selected album, expanded tracks and download progress
-in Amber · Original. These screenshots contain synthetic data.
+- the date becomes a year (`1998-08-03` becomes `1998`);
+- a separate `YEAR` tag from your upload is left as it was, even when you changed the year;
+- an additional artist can appear twice in the artist tag.
 
-![ibfetch searching a music library and downloading selected tracks](docs/screenshots/ibfetch-amber-download.jpg)
+Choose **Streaming: exactly as uploaded** in the app, or `--source stream`, for the file
+byte for byte as you uploaded it. Streaming is slower but can resume a half-downloaded
+track. MP3 bitrates always stream. See [iBroadcast's export guide](https://help.ibroadcast.com/exporting-library)
+for its setting.
 
-The iBroadcast-inspired blue palette, with folder naming settings visible:
-
-![ibfetch blue palette showing albums and download settings](docs/screenshots/ibfetch-blue-library.jpg)
+If the download service can't deliver a track, ibfetch asks again twice and then saves
+the uploaded file by streaming. Such a track is listed with a note and has the tags as
+uploaded. The note is kept in the hidden manifest, including after a failed move from
+the work folder, a retry or verification. Names and folders always use your current iBroadcast library data. The hidden
+JSON manifest records download identity and integrity; it never writes tags or artwork.
 
 ## Install
 
@@ -42,13 +47,13 @@ The iBroadcast-inspired blue palette, with folder naming settings visible:
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.2.1 | Open after extracting |
+| System | Download for 1.3.0 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.2.1/ibfetch-1.2.1-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.2.1/ibfetch-1.2.1-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.2.1/ibfetch-1.2.1-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.2.1/ibfetch-1.2.1-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.2.1/ibfetch-1.2.1-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.3.0/ibfetch-1.3.0-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.3.0/ibfetch-1.3.0-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.3.0/ibfetch-1.3.0-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.3.0/ibfetch-1.3.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.3.0/ibfetch-1.3.0-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
@@ -68,7 +73,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.2.1-linux-x64.tar.gz
+tar -xzf ibfetch-1.3.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -154,6 +159,7 @@ Without a command, ibfetch opens its app in your browser. It runs on your own co
 2. Pick an artist on the left, a letter for every artist on that letter, or search with the fields. `*` matches anything.
 3. Tick albums and add them to the download list, or add all results at once. The arrow before an album shows its tracks. Shift-click selects a range.
 4. Choose a folder, a quality and how many files at the same time, then press Download.
+   For original files, **Original files from** chooses the download service or streaming.
 
 The download list can mix several searches. Stop whenever you like: Try again carries on, finished files are skipped. Quit stops the app.
 
@@ -164,7 +170,7 @@ left in a download folder by 1.1.0 to 1.1.3 is no longer used: you can delete it
 older ibfetch is running. Different tracks sharing a lock slot wait their turn and
 remain cancellable.
 
-The app saves your folder, quality, file name and work folder settings when you start a download.
+The app saves your folder, quality, source, file name and work folder settings when you start a download.
 Use **Theme** in the header to choose Tagcast's Forest, Ocean, Warm or iBroadcast
 inspired colours, independently of Auto, Light or Dark appearance. Forest is the
 default. Theme choices are saved immediately and restored before the page is
@@ -317,10 +323,19 @@ performs full hashing. The record contains no OAuth tokens. A changed streaming
 URL does not invalidate an already downloaded file.
 
 Incomplete audio uses `.part`; its source-bound resume record is in the same
-hidden manifest. Keep the manifest and partial audio to resume.
+hidden manifest. Keep the manifest and partial audio to resume. Only streamed tracks
+resume: the download service can't continue a track, so ibfetch starts it over. A
+streamed `.part` is also replaced when the next run uses the download service.
 The server's byte range is checked before appending; HTTP 416 alone is never
 treated as proof of completion. The local digest detects later local changes;
 it is not a checksum supplied by iBroadcast.
+
+A finished track counts as downloaded whichever source saved it, so switching sources
+never downloads it again. To replace older streamed files with iBroadcast's edited tags,
+download to a new output folder first so you can compare and keep your old copies.
+If you deliberately remove an old audio file, the next run downloads it again; keep
+the hidden manifest. An interrupted replacement can recover from its completed receipt,
+after checking the new file's identity, length and SHA-256 against that receipt.
 
 Changed files are **skipped: locally modified**; files without a trustworthy record
 are **skipped: unverified**. Neither is overwritten or reported as a failed download.
@@ -363,6 +378,7 @@ folders in download folders are not used by 1.1.4 and later.
 | --- | --- | --- |
 | `-o`, `--out` | `./iBroadcast` | download folder |
 | `-q`, `--quality` | `orig` | `orig`, `320`, `256`, `192`, `128` or `96` |
+| `--source` | `download` | for original files: `download` (iBroadcast's tags, faster) or `stream` (exactly as uploaded, resumable) |
 | `-j`, `--jobs` | `3` | parallel downloads, 1 to 8 |
 | `--layout` | see above | folders and file names |
 | `-n`, `--dry-run` | | show the selection, download nothing |
@@ -385,9 +401,9 @@ the sign-in and library cache; the app's folder/quality/name settings are retain
 
 ## How it works
 
-ibfetch signs in with iBroadcast's OAuth device flow, reads your library index from `library.ibroadcast.com` and fetches each selected track from iBroadcast's streaming server, asking for the original file (or the bitrate you chose). Every track is its own download, so one failed file never costs you a whole batch.
+ibfetch signs in with iBroadcast's OAuth device flow and reads your library index from `library.ibroadcast.com`. Original files come from `download.ibroadcast.com`, one track per request: ibfetch unpacks the ZIP while it arrives and checks iBroadcast's end marker, the archive's sizes and its CRC-32 before a file is saved. MP3 bitrates, and originals with `--source stream`, come from iBroadcast's streaming server. Every track is its own download, so one failed file never costs you a whole batch.
 
-MediaSync Lite works differently: it asks `download.ibroadcast.com` for the whole library in numbered zip segments and unpacks them. That endpoint has no way to pick artists or albums.
+MediaSync Lite uses the same download service for the whole library at once, in numbered ZIP segments. The service also takes a list of tracks; asking for one at a time keeps a failure to one track and lets several download side by side.
 
 ## Troubleshooting
 
@@ -395,6 +411,7 @@ MediaSync Lite works differently: it asks `download.ibroadcast.com` for the whol
 - **HTTP 403 or 404 on some tracks**: your library changed since the index was cached. Run with `--refresh`.
 - **Nothing matches**: check the spelling with `ibfetch artists "name*"`.
 - **Some files failed**: check their details; temporary network failures can be retried.
+- **Saved with a note: Fallback**: the download service couldn't deliver that track, so it was streamed with the tags as uploaded. Delete it and run again to try the download service once more.
 - **Modified or unverified complete file**: it was preserved and skipped; see verification/adoption above.
 - **Unverified partial**: preserve it and choose a fresh output folder; partial adoption is not supported.
 - **Another download is actively using this path**: wait for the other writer; crashes release the lock automatically.

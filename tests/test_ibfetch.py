@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 import urllib.parse
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -595,6 +596,409 @@ ibfetch.fetch_track(session, lib, Path(sys.argv[1]), Path('song.flac'),
         self.assertEqual(transfer.snapshot()["done"], 2)
 
 
+class Unseekable(io.RawIOBase):
+    """A write-only sink: zipfile then streams like iBroadcast, sizes after the data."""
+
+    def __init__(self):
+        super().__init__()
+        self.data = bytearray()
+
+    def writable(self):
+        return True
+
+    def write(self, chunk):
+        self.data.extend(chunk)
+        return len(chunk)
+
+
+def service_zip(audio=b"edited-audio", name="Artist/Album/1 Song.flac", marker=True, others=(), streamed=True):
+    """A single-track archive as iBroadcast's download service sends it, with its end marker."""
+    sink = Unseekable() if streamed else io.BytesIO()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr(name, audio)
+        for other in others:
+            archive.writestr(other, b"more")
+    data = bytes(sink.data) if streamed else sink.getvalue()
+    return data + (b"EOF\n" if marker else b"")
+
+
+def zip_response(data, status=200):
+    return Response(data, status, **{"Content-Type": "application/zip"})
+
+
+class DownloadServiceTests(unittest.TestCase):
+    """Original files from iBroadcast's download service: one streamed ZIP per track."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.out, self.locks = root / "music", root / "home" / "locks"
+        self.out.mkdir()
+        self.lib = library()
+        self.session = Mock()
+        self.session.stream.side_effect = lambda *args: Response(
+            b"uploaded-audio", 200, **{"Content-Length": "14", "Content-Type": "audio/flac"})
+        self.stop = threading.Event()
+        self.final = self.out / "song.flac"
+        self.part = self.out / "song.flac.part"
+        self.record = app.DownloadRecord(self.final, self.locks)
+        self.part_record = app.DownloadRecord(self.final, self.locks, partial=True)
+
+    def fetch(self, source="download", progress=None, **options):
+        options.setdefault("locks", self.locks)
+        return app.fetch_track(self.session, self.lib, self.out, Path("song.flac"), "/orig/one", 1,
+                               self.stop, progress, "orig", source=source, **options)
+
+    def serve(self, *bodies):
+        """Answer each request with the next archive; the last one repeats."""
+        replies = iter(bodies)
+        self.session.download.side_effect = lambda *args: zip_response(next(replies, bodies[-1]))
+
+    def identity(self):
+        return json.loads(self.record.read_text())["identity"]
+
+    def test_only_the_audio_is_saved_and_recorded_from_the_download_service(self):
+        audio = os.urandom(5000)
+        self.serve(service_zip(audio))
+        with patch.object(app, "CHUNK", 37), patch.object(app, "ZIP_TAIL", 300), \
+                patch.object(app, "file_hasher", side_effect=AssertionError("unexpected audio read")):
+            self.assertEqual(self.fetch(), ("ok", 5000, ""))
+        self.assertEqual(self.final.read_bytes(), audio)
+        self.assertEqual(self.identity()["route"], "download")
+        self.assertEqual(json.loads(self.record.read_text())["sha256"], app.hashlib.sha256(audio).hexdigest())
+        self.assertFalse(self.part.exists())
+        self.assertFalse(self.part_record.exists())
+        self.session.stream.assert_not_called()
+        self.session.download.assert_called_once_with(1, "test-account")
+
+    def test_an_archive_with_sizes_up_front_is_accepted_too(self):
+        self.serve(service_zip(b"edited-audio", streamed=False))
+        self.assertEqual(self.fetch(), ("ok", 12, ""))
+        self.assertEqual(self.final.read_bytes(), b"edited-audio")
+
+    def test_a_corrupt_archive_is_downloaded_again_and_never_saved(self):
+        good = service_zip(b"edited-audio")
+        bad = good.replace(b"edited-audio", b"edited-AUDIO")
+        self.serve(bad, good)
+        with patch.object(self.stop, "wait", return_value=False):
+            self.assertEqual(self.fetch(), ("ok", 12, ""))
+        self.assertEqual(self.session.download.call_count, 2)
+        self.assertEqual(self.final.read_bytes(), b"edited-audio")
+
+    def test_a_missing_end_marker_is_retried_then_the_track_streams(self):
+        self.serve(service_zip(marker=False))
+        with patch.object(self.stop, "wait", return_value=False):
+            state, nbytes, note = self.fetch()
+        self.assertEqual((state, nbytes), ("ok", 14))
+        self.assertTrue(note.startswith("Fallback: the download service stopped before its end marker"))
+        self.assertEqual(self.session.download.call_count, 3)
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+        self.assertEqual(self.identity()["route"], "stream")
+        self.assertEqual(self.session.stream.call_args.args[-1], 0)
+
+    def test_unexpected_archives_stream_without_asking_the_service_again(self):
+        for name, others in (("Artist/Album/1 Song.mp3", ()), ("Artist/Album/1 Song.flac", ("cover.jpg",))):
+            with self.subTest(name=name, others=others):
+                for path in (self.final, self.part):
+                    if path.exists():
+                        path.unlink()
+                if self.record.exists():
+                    self.record.unlink()
+                self.session.download.reset_mock()
+                self.serve(service_zip(name=name, others=others))
+                state, _, note = self.fetch()
+                self.assertEqual(state, "ok")
+                self.assertIn("Fallback:", note)
+                self.session.download.assert_called_once()
+                self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+
+    def test_a_refusal_streams_and_both_failures_are_reported(self):
+        self.session.download.side_effect = app.ServiceError("iBroadcast's download service refused it (HTTP 400)")
+        self.assertIn("refused it (HTTP 400)", self.fetch()[2])
+        self.final.unlink()
+        self.record.unlink()
+        self.session.stream.side_effect = ConnectionResetError()
+        with patch.object(self.stop, "wait", return_value=False):
+            state, _, note = self.fetch()
+        self.assertEqual(state, "fail")
+        self.assertIn("refused it (HTTP 400); streaming also failed: network error", note)
+        self.assertFalse(self.final.exists())
+
+    def test_a_streamed_partial_is_replaced_not_appended_to(self):
+        def progress(*unused):
+            self.stop.set()
+        with patch.object(app, "CHUNK", 4):
+            self.assertEqual(self.fetch("stream", progress)[0], "stopped")
+        self.stop.clear()
+        self.assertEqual(self.part.read_bytes(), b"uplo")
+        self.serve(service_zip(b"edited-audio"))
+        self.assertEqual(self.fetch(), ("ok", 12, ""))
+        self.assertEqual(self.final.read_bytes(), b"edited-audio")
+
+    def test_a_partial_from_the_download_service_is_never_resumed_by_streaming(self):
+        def progress(*unused):
+            self.stop.set()
+        self.serve(service_zip(os.urandom(3000)))
+        with patch.object(app, "CHUNK", 100), patch.object(app, "ZIP_TAIL", 300):
+            self.assertEqual(self.fetch(progress=progress)[0], "stopped")
+        self.stop.clear()
+        self.assertTrue(self.part.exists())
+        self.assertEqual(json.loads(self.part_record.read_text())["identity"]["route"], "download")
+        self.assertEqual(self.fetch("stream"), ("ok", 14, ""))
+        self.assertEqual(self.session.stream.call_args.args[-1], 0)
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+
+    def test_a_partial_for_another_track_is_still_preserved(self):
+        self.part.write_bytes(b"someone-elses")
+        self.serve(service_zip())
+        self.assertEqual(self.fetch()[0], "fail")
+        self.assertEqual(self.part.read_bytes(), b"someone-elses")
+        self.session.download.assert_not_called()
+
+    def test_a_track_saved_by_either_route_is_skipped_by_the_other(self):
+        self.assertEqual(self.fetch("stream"), ("ok", 14, ""))
+        self.assertEqual(self.fetch(), ("skip", 0, ""))
+        self.session.download.assert_not_called()
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+
+    def test_stopping_during_a_service_download_keeps_audio_out_of_place(self):
+        self.serve(service_zip(os.urandom(3000)))
+        with patch.object(app, "CHUNK", 100), patch.object(app, "ZIP_TAIL", 300):
+            self.assertEqual(self.fetch(progress=lambda *unused: self.stop.set())[0], "stopped")
+        self.assertFalse(self.final.exists())
+
+    def test_bitrates_stream_and_the_service_only_takes_originals(self):
+        self.assertEqual(app.resolve_source(None, "orig"), "download")
+        self.assertEqual(app.resolve_source(None, "320"), "stream")
+        self.assertEqual(app.resolve_source("stream", "orig"), "stream")
+        with self.assertRaises(app.Fail):
+            app.resolve_source("download", "320")
+        with self.assertRaises(app.Fail):
+            app.resolve_source("ftp", "orig")
+        with self.assertRaises(ValueError):
+            app.fetch_track(self.session, self.lib, self.out, Path("song.mp3"), "/320/one", 1,
+                            self.stop, quality="320", locks=self.locks, source="download")
+
+    def test_cli_uses_the_service_reports_fallbacks_and_rejects_it_for_bitrates(self):
+        args = SimpleNamespace(out=str(self.out), jobs=1, quality="orig", layout="{title}",
+                               verify=False, adopt_existing=False, source=None)
+        jobs = [(Path("one.flac"), "/orig/one", 1)]
+        fallback = "Fallback: the service refused it; saved the file as uploaded, without iBroadcast's tag edits."
+        output = io.StringIO()
+        with patch.object(app, "plan_jobs", return_value=jobs), \
+                patch.object(app, "fetch_track", return_value=("ok", 14, fallback)) as fetch, \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(app.run_downloads(self.session, self.lib, [(10, [1])], args), 0)
+        self.assertEqual(fetch.call_args.args[-1], "download")
+        self.assertIn(fallback, output.getvalue())
+        self.assertIn("1 track came from the streaming server", output.getvalue())
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code = app.main(["--home", self.tmp.name, "get", "--all", "--source", "download", "--quality", "320"])
+        self.assertEqual(code, 2)
+        self.assertIn("only delivers original files", errors.getvalue())
+        self.assertNotIn("Not signed in", errors.getvalue())
+
+    def test_a_fallback_note_survives_the_move_from_a_work_folder(self):
+        self.session.download.side_effect = app.ServiceError("refused")
+        work = Path(self.tmp.name) / "work"
+        state, nbytes, note = self.fetch(work=work)
+        self.assertEqual((state, nbytes), ("ok", 14))
+        self.assertTrue(note.startswith("Fallback: refused"))
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+        self.assertEqual([p for p in work.rglob("*") if p.is_file()], [])
+
+    def test_fallback_note_survives_a_failed_move_retry_verify_and_later_skip(self):
+        self.session.download.side_effect = app.ServiceError("refused")
+        work = Path(self.tmp.name) / "work"
+        with patch.object(app.shutil, "copyfile", side_effect=OSError(app.errno.EIO, "NAS offline")):
+            self.assertEqual(self.fetch(work=work)[0], "fail")
+        local = app.work_root(work, self.out) / "song.flac"
+        record = app.DownloadRecord(local, self.locks)
+        self.assertTrue(json.loads(record.read_text())["note"].startswith("Fallback:"))
+        self.session.download.reset_mock()
+        self.session.stream.reset_mock()
+        state, nbytes, note = self.fetch(work=work, verify=True)
+        self.assertEqual((state, nbytes), ("ok", 14))
+        self.assertTrue(note.startswith("Fallback:"))
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+        self.assertEqual(self.identity()["route"], "stream")
+        self.assertTrue(json.loads(self.record.read_text())["note"].startswith("Fallback:"))
+        self.assertTrue(self.fetch(verify=True)[2].startswith("Fallback:"))
+        self.assertEqual(self.identity()["route"], "stream")
+        self.session.download.assert_not_called()
+        self.session.stream.assert_not_called()
+
+    def test_cached_stream_copy_from_an_older_record_is_reported_when_download_is_selected(self):
+        work = Path(self.tmp.name) / "work"
+        with patch.object(app.shutil, "copyfile", side_effect=OSError(app.errno.EIO, "NAS offline")):
+            self.fetch(source="stream", work=work)
+        self.session.stream.reset_mock()
+        state, _, note = self.fetch(work=work)
+        self.assertEqual(state, "ok")
+        self.assertTrue(note.startswith("Fallback:"))
+        self.assertIn("work folder", note)
+        self.assertEqual(self.identity()["route"], "stream")
+        self.session.download.assert_not_called()
+        self.session.stream.assert_not_called()
+
+    def test_common_extension_aliases_use_the_service_without_following_zip_paths(self):
+        for archived, planned in ((".aif", ".aiff"), (".aiff", ".aif"), (".wave", ".wav"),
+                                  (".oga", ".ogg"), (".mp4", ".m4a")):
+            with self.subTest(archived=archived, planned=planned):
+                rel = Path("alias-" + archived[1:] + planned)
+                self.serve(service_zip(b"edited-audio", name="../../outside/Track" + archived.upper()))
+                self.assertEqual(app.fetch_track(self.session, self.lib, self.out, rel, "/orig/one", 1,
+                                                self.stop, locks=self.locks, source="download"), ("ok", 12, ""))
+                self.assertEqual((self.out / rel).read_bytes(), b"edited-audio")
+                self.assertFalse((Path(self.tmp.name) / "outside").exists())
+        self.session.stream.assert_not_called()
+
+    def test_different_containers_are_not_treated_as_extension_aliases(self):
+        for archived, planned in ((".aac", ".m4a"), (".opus", ".ogg"), (".aifc", ".aiff")):
+            with self.subTest(archived=archived, planned=planned):
+                self.serve(service_zip(b"edited-audio", name="Track" + archived))
+                state, _, note = app.fetch_track(self.session, self.lib, self.out,
+                    Path("different-" + archived[1:] + planned), "/orig/one", 1,
+                    self.stop, locks=self.locks, source="download")
+                self.assertEqual(state, "ok")
+                self.assertTrue(note.startswith("Fallback:"))
+
+    def test_fallback_provenance_survives_completion_receipt_recovery(self):
+        self.session.download.side_effect = app.ServiceError("refused")
+        write = app.write_private
+        def interrupted(path, raw):
+            if path == self.record:
+                raise OSError("interrupted after rename")
+            return write(path, raw)
+        with patch.object(app, "write_private", interrupted), self.assertRaises(OSError):
+            self.fetch()
+        self.assertIn("Fallback:", self.fetch()[2])
+        self.assertEqual(self.identity()["route"], "stream")
+
+    def test_replacement_receipt_preserves_a_new_notice_even_with_identical_audio_stats(self):
+        self.fetch("stream")
+        old = self.final.stat()
+        self.final.unlink()
+        self.session.download.side_effect = app.ServiceError("refused")
+        replace, write = os.replace, app.write_private
+        def same_timestamp(source, target):
+            replace(source, target)
+            if target == self.final:
+                os.utime(target, ns=(old.st_atime_ns, old.st_mtime_ns))
+        def interrupted(path, raw):
+            if path == self.record:
+                raise OSError("interrupted after rename")
+            return write(path, raw)
+        with patch.object(os, "replace", same_timestamp), patch.object(app, "write_private", interrupted):
+            with self.assertRaises(OSError):
+                self.fetch()
+        self.assertIn("Fallback:", self.fetch()[2])
+        self.assertTrue(json.loads(self.record.read_text())["note"].startswith("Fallback:"))
+        self.assertEqual(self.final.read_bytes(), b"uploaded-audio")
+        self.assertTrue(self.fetch(verify=True)[2].startswith("Fallback:"))
+        self.assertEqual(self.identity()["route"], "stream")
+
+    def test_replacement_is_recovered_after_real_process_death_with_an_old_baseline(self):
+        code = """
+import os, sys, threading
+from pathlib import Path
+from types import SimpleNamespace
+import ibfetch
+sys.path.insert(0, 'tests')
+from test_ibfetch import library, Response, service_zip, zip_response
+out, locks = Path(sys.argv[1]), Path(sys.argv[2])
+session = SimpleNamespace(
+    stream=lambda *args: Response(b'uploaded-audio', 200, **{'Content-Length':'14','Content-Type':'audio/flac'}),
+    download=lambda *args: zip_response(service_zip(b'edited-audio')))
+args = (session, library(), out, Path('song.flac'), '/orig/one', 1, threading.Event())
+ibfetch.fetch_track(*args, locks=locks, source='stream')
+(out/'song.flac').unlink()
+replace = os.replace
+def interrupted(source, destination):
+    replace(source, destination)
+    if Path(destination).name == 'song.flac':
+        print('replacement renamed', flush=True)
+        sys.stdin.read()
+os.replace = interrupted
+ibfetch.fetch_track(*args, locks=locks, source='download')
+"""
+        child = subprocess.Popen([sys.executable, "-B", "-c", code, str(self.out), str(self.locks)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), "replacement renamed")
+            child.kill()
+            child.wait(timeout=5)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=5)
+        self.assertIn("Recovered:", self.fetch()[2])
+        self.assertEqual(self.final.read_bytes(), b"edited-audio")
+        self.assertEqual(json.loads(self.record.read_text())["sha256"], app.file_digest(self.final))
+        self.assertEqual(self.identity()["route"], "download")
+        self.assertFalse(self.part_record.exists())
+        self.assertEqual(self.fetch(), ("skip", 0, ""))
+        self.session.download.assert_not_called()
+
+    def test_replacement_recovery_does_not_trust_a_wrong_receipt_or_changed_audio(self):
+        self.fetch("stream")
+        old_record = self.record.read_bytes()
+        self.final.unlink()
+        self.serve(service_zip(b"edited-audio"))
+        write = app.write_private
+        def interrupted(path, raw):
+            if path == self.record:
+                raise OSError("interrupted after rename")
+            return write(path, raw)
+        with patch.object(app, "write_private", interrupted), self.assertRaises(OSError):
+            self.fetch()
+        valid = json.loads(self.part_record.read_text())
+        for changes in ({"identity": {**valid["identity"], "track_id": 999}}, {"sha256": "0" * 64}):
+            with self.subTest(changes=changes):
+                self.part_record.write_text(json.dumps({**valid, **changes}))
+                self.assertIn("Modified:", self.fetch()[2])
+                self.assertEqual(self.record.read_bytes(), old_record)
+                self.assertEqual(self.final.read_bytes(), b"edited-audio")
+        self.part_record.write_text(json.dumps(valid))
+        digest = app.file_digest
+        def changed_during_hash(path):
+            value = digest(path)
+            if path == self.final:
+                before = path.stat()
+                path.write_bytes(b"changed-data")
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+            return value
+        with patch.object(app, "file_digest", changed_during_hash):
+            self.assertIn("Modified:", self.fetch()[2])
+        self.assertEqual(self.record.read_bytes(), old_record)
+        self.assertEqual(self.final.read_bytes(), b"changed-data")
+
+    def test_the_service_request_refreshes_a_refused_token_once_and_never_reports_it(self):
+        home = Path(self.tmp.name) / "home"
+        home.mkdir(exist_ok=True)
+        (home / "tokens.json").write_text(json.dumps({"access_token": "old-token", "refresh_token": "r",
+                                                     "client_id": "c", "expires_at": 9999999999}))
+        session = app.Session(home)
+        refused = Response(b'{"authenticated": false}', 401, **{"Content-Type": "application/json"})
+        with patch.object(session, "refresh", return_value="new-token") as refresh, \
+                patch.object(app, "http", side_effect=[refused, zip_response(service_zip())]) as http:
+            session.download(1, "test-account").close()
+        refresh.assert_called_once_with("old-token")
+        forms = [urllib.parse.parse_qs(call.args[2].decode()) for call in http.call_args_list]
+        self.assertEqual([form["_token"] for form in forms], [["old-token"], ["new-token"]])
+        self.assertEqual(forms[1]["mode"], ["downloadlibrary"])
+        self.assertEqual(forms[1]["container_type"], ["track"])
+        self.assertEqual(forms[1]["ids"], ["1"])
+        self.assertEqual(forms[1]["end_marker"], ["1"])
+        busy = Response(b'{"message": "busy"}', 503, **{"Content-Type": "application/json"})
+        with patch.object(app, "http", return_value=busy), self.assertRaises(app.ServiceError) as caught:
+            session.download(1, "test-account")
+        self.assertTrue(caught.exception.retry)
+        self.assertNotIn("token", str(caught.exception))
+
+
 class WorkFolderTests(unittest.TestCase):
     """Download to a local work folder, then move each finished track to the output."""
 
@@ -700,6 +1104,38 @@ class WorkFolderTests(unittest.TestCase):
         self.assertIn("Recovered:", self.fetch()[2])
         self.assertEqual(self.work_files(), [])
         self.assertEqual(self.fetch(), ("skip", 0, ""))
+
+    def test_replacement_move_recovers_over_its_own_old_baseline(self):
+        self.fetch()
+        self.target.unlink()  # keep the old manifest while replacing the audio
+        self.session.stream.side_effect = lambda *args: Response(b"new-audio", 200,
+            **{"Content-Length": "9", "Content-Type": "audio/flac"})
+        write = app.write_private
+        def interrupted(path, raw):
+            if path == app.DownloadRecord(self.target, self.locks):
+                raise OSError("interrupted after move rename")
+            return write(path, raw)
+        with patch.object(app, "write_private", interrupted):
+            self.assertEqual(self.fetch()[0], "fail")
+        self.session.stream.reset_mock()
+        self.assertIn("Recovered:", self.fetch()[2])
+        self.assertEqual(self.target.read_bytes(), b"new-audio")
+        record = json.loads(app.DownloadRecord(self.target, self.locks).read_text())
+        self.assertEqual(record["sha256"], app.file_digest(self.target))
+        self.assertEqual(self.work_files(), [])
+        self.session.stream.assert_not_called()
+
+    def test_move_recovery_never_reassigns_a_target_record_from_another_account(self):
+        with patch.object(app, "_remove_local_copy", side_effect=OSError("interrupted cleanup")):
+            self.fetch()
+        target_record = app.DownloadRecord(self.target, self.locks)
+        record = json.loads(target_record.read_text())
+        record["identity"]["user_id"] = "another-account"
+        target_record.write_text(json.dumps(record))
+        before = target_record.read_bytes()
+        self.assertIn("Unverified:", self.fetch()[2])
+        self.assertEqual(target_record.read_bytes(), before)
+        self.assertTrue(self.local.exists())
 
     def test_leftover_copy_after_a_verified_move_is_discarded(self):
         with patch.object(app, "_remove_local_copy", side_effect=OSError(app.errno.EIO, "interrupted")):
@@ -1078,6 +1514,26 @@ class StateTests(unittest.TestCase):
         self.assertEqual(instance.transfer.locks, app.lock_folder(self.home))
         self.assertEqual(instance.settings["work"], str(self.home / "work"))
 
+    def test_source_setting_round_trips_and_bitrates_always_stream(self):
+        (self.home / "app-settings.json").write_text(json.dumps({"source": "stream"}))
+        self.assertEqual(app.App(self.home).settings["source"], "stream")
+        (self.home / "app-settings.json").write_text(json.dumps({"source": "ftp"}))
+        self.assertEqual(app.App(self.home).settings["source"], "download")
+        instance = self.connected()
+        body = {"out": str(self.home / "music"), "source": "ftp", "items": [{"album_id": 10, "tracks": [1]}]}
+        with self.assertRaises(app.Fail):
+            instance.download(body)
+        self.assertIsNone(instance.transfer)
+        for quality, chosen, used in (("orig", "download", "download"), ("orig", "stream", "stream"),
+                                      ("320", "download", "stream")):
+            with self.subTest(quality=quality, chosen=chosen):
+                instance.transfer = None
+                with patch.object(app.threading, "Thread"):
+                    instance.download({**body, "quality": quality, "source": chosen})
+                self.assertEqual(instance.transfer.source, used)
+                self.assertEqual(instance.settings["source"], chosen)
+        self.assertEqual(json.loads((self.home / "app-settings.json").read_text())["source"], "download")
+
     def test_ready_transfer_reserves_the_slot_before_thread_start(self):
         instance = self.connected()
         body = {"out": str(self.home / "music"), "quality": "orig", "jobs": 1,
@@ -1263,7 +1719,8 @@ class MockBroadcastTests(unittest.TestCase):
 
     def test_oauth_cache_download_and_token_refresh(self):
         audio = b"synthetic-audio-data"
-        calls = []
+        edited = os.urandom(200_000)
+        calls, forms = [], []
         lib = library()
         payload = {"library": {"artists": {str(k): v for k, v in lib.artists.rows.items()},
                                "albums": {str(k): v for k, v in lib.albums.rows.items()},
@@ -1271,6 +1728,8 @@ class MockBroadcastTests(unittest.TestCase):
                                "expires": "1999999999"}, "status": {"lastmodified": "test-revision"}}
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"  # the download service streams with chunked encoding
+
             def log_message(self, *unused):
                 pass
 
@@ -1294,7 +1753,19 @@ class MockBroadcastTests(unittest.TestCase):
 
             def do_POST(self):
                 calls.append(self.path)
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                if self.path == "/download":
+                    forms.append(urllib.parse.parse_qs(body.decode()))
+                    data = service_zip(edited)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    for start in range(0, len(data), 70_000):
+                        piece = data[start:start + 70_000]
+                        self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
+                    self.wfile.write(b"0\r\n\r\n")
+                    return
                 if self.path == "/oauth/token":
                     self.send({"access_token": "fake-access", "refresh_token": "fake-refresh",
                                "expires_in": 3600})
@@ -1331,6 +1802,14 @@ class MockBroadcastTests(unittest.TestCase):
                                          "/orig/one", 1, threading.Event(), locks=app.lock_folder(home))
                 self.assertEqual(result, ("ok", len(audio), ""))
                 self.assertEqual((home / "music/song.flac").read_bytes(), audio)
+                with patch.object(app, "DOWNLOAD_URL", base + "/download"):
+                    result = app.fetch_track(session, loaded, home / "music", Path("edited.flac"), "/orig/one", 1,
+                                             threading.Event(), locks=app.lock_folder(home), source="download")
+                self.assertEqual(result, ("ok", len(edited), ""))
+                self.assertEqual((home / "music/edited.flac").read_bytes(), edited)
+                self.assertEqual(forms[-1]["_token"], ["fake-access"])
+                self.assertEqual(forms[-1]["_user_id"], ["test-account"])
+                self.assertEqual(forms[-1]["ids"], ["1"])
         finally:
             server.shutdown()
             server.server_close()
