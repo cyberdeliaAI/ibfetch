@@ -1,0 +1,2 @@
+# Keep official and embedded SVG artwork byte-for-byte identical on every platform.
+*.svg -text
