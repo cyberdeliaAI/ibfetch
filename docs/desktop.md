@@ -48,7 +48,7 @@ computer may prohibit unsigned apps. Do not disable system-wide protections.
 Extract and run from a graphical desktop:
 
 ```sh
-tar -xzf ibfetch-1.3.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.3.1-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -63,20 +63,20 @@ Each release archive has a .sha256 companion. Keep both in the same folder.
 macOS:
 
 ```sh
-shasum -a 256 -c ibfetch-1.3.0-macos-arm64.zip.sha256
+shasum -a 256 -c ibfetch-1.3.1-macos-arm64.zip.sha256
 ```
 
 Linux:
 
 ```sh
-sha256sum -c ibfetch-1.3.0-linux-x64.tar.gz.sha256
+sha256sum -c ibfetch-1.3.1-linux-x64.tar.gz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\ibfetch-1.3.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\ibfetch-1.3.0-windows-x64.zip.sha256
+Get-FileHash .\ibfetch-1.3.1-windows-x64.zip -Algorithm SHA256
+Get-Content .\ibfetch-1.3.1-windows-x64.zip.sha256
 ```
 
 Compare the 64-character digest exactly. A checksum checks download integrity;
@@ -112,14 +112,18 @@ python tools/build_desktop.py
 
 Linux needs a display; CI uses `xvfb-run -a python tools/build_desktop.py`.
 The script builds Python with PyInstaller, installs locked Electron dependencies,
-packages the app and runtime notices, tests its isolated renderer, archives it,
+packages the app, Mozilla CA certificates and runtime notices, validates its trusted
+HTTPS roots, tests its isolated renderer, archives it,
 checks the extracted archive, and writes its SHA-256 companion. macOS also checks
 the ad-hoc signature. Pillow draws the original icon at build time only.
 
 The Desktop builds workflow makes all four native archives. Releases use verified
 archives from a successful run; Python/browser ZIPs contain the standalone file,
 MIT license and documentation. Build logs and automated tests use temporary settings
-and synthetic data, never a real music account.
+and synthetic data, never a real music account. Local HTTPS tests verify trusted
+connections and rejection of incorrect hostnames/untrusted certificates. The desktop
+interpreter uses its bundled roots unless SSL_CERT_FILE or SSL_CERT_DIR is explicitly
+configured; it does not depend on the build machine's Python certificate paths.
 
 ## Runtime security and ownership
 

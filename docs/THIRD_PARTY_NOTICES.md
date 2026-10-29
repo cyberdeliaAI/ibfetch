@@ -13,6 +13,9 @@ The standalone desktop downloads include other software under its own terms.
 - **Electron:** MIT. Its license and Chromium/Node dependency notices
   (LICENSES.chromium.html) are copied from the installed Electron distribution
   into resources/licenses for each native build.
+- **certifi / Mozilla CA certificates:** MPL-2.0. Only the trusted root certificate
+  data is bundled; the normal Python/browser version still needs no third-party packages.
+  The installed certifi license is copied into desktop resources/licenses/certifi.txt.
 - **OpenSSL, libffi, zlib and Expat:** license copies are retained in licenses/ and
   desktop resources/licenses for runtime libraries that a native build may bundle.
   Platform system libraries retain their respective licenses.

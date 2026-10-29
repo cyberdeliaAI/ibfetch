@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 import struct
 import subprocess
 import sys
@@ -42,7 +43,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -248,6 +249,14 @@ def as_json(raw):
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError, OSError, HTTPException)
 
 
+def connection_error(error, service="iBroadcast"):
+    reason = getattr(error, "reason", error)
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return (f"Could not verify {service}'s HTTPS certificate. Update the desktop app, "
+                "or check your Python installation's trusted certificates.")
+    return f"Could not reach {service} ({error.__class__.__name__})."
+
+
 def textual(response):
     """True for an error page or API answer rather than file data."""
     kind = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
@@ -277,7 +286,7 @@ def post_read(url, body, headers, timeout):
             raw = read_body(response)
         except NETWORK_ERRORS as error:
             if last:
-                raise Fail(f"Could not reach iBroadcast ({error.__class__.__name__}).") from None
+                raise Fail(connection_error(error)) from None
             continue
         if (code == 429 or code >= 500) and not last:
             continue
@@ -300,7 +309,7 @@ def oauth_post(path, form):
                         {"Content-Type": "application/x-www-form-urlencoded"}, 45)
         return status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
-        raise Fail(f"Could not reach iBroadcast sign-in ({error.__class__.__name__}).") from None
+        raise Fail(connection_error(error, "iBroadcast sign-in")) from None
 
 
 def token_record(data, client_id, refresh_token=""):
@@ -319,7 +328,7 @@ def device_start(client_id):
         response = http("GET", f"{OAUTH_URL}/device/code?{query}", timeout=45)
         code, data = status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
-        raise Fail(f"Could not reach iBroadcast sign-in ({error.__class__.__name__}).") from None
+        raise Fail(connection_error(error, "iBroadcast sign-in")) from None
     if code >= 400 or not data.get("device_code"):
         raise Fail(f"iBroadcast refused the sign-in request (HTTP {code}). Check the client ID.")
     data.setdefault("verification_uri", "https://oauth.ibroadcast.com/device")

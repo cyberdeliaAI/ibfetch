@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import shutil
+import ssl
 import subprocess
 import sys
 import tarfile
@@ -20,9 +21,13 @@ def check_app(executable, version):
     resources = (executable.parent.parent / "Resources" if sys.platform == "darwin"
                  else executable.parent / "resources")
     for relative in ("LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/Electron.txt",
-                     "licenses/LICENSES.chromium.html", "licenses/PyInstaller.txt", "licenses/Python-3.13.txt"):
+                     "licenses/LICENSES.chromium.html", "licenses/PyInstaller.txt", "licenses/Python-3.13.txt",
+                     "licenses/certifi.txt"):
         if not (resources / relative).is_file():
             raise RuntimeError("Missing bundled license: " + relative)
+    bundle = resources / "backend/_internal/certificates/cacert.pem"
+    if not ssl.create_default_context(cafile=str(bundle)).get_ca_certs():
+        raise RuntimeError("The bundled backend has no trusted HTTPS roots")
     with tempfile.TemporaryDirectory(prefix="ibfetch-desktop-check-") as tmp:
         home = Path(tmp)
         report = home / "report.json"
@@ -49,6 +54,7 @@ def main():
     if not npm or not node:
         parser.error("Node.js and npm are required only for desktop builds")
     from PIL import Image, ImageDraw, ImageFont
+    import certifi
     assets = ROOT / "build/assets"
     assets.mkdir(parents=True, exist_ok=True)
     icon = Image.new("RGBA", (1024, 1024))
@@ -59,6 +65,8 @@ def main():
     icon.save(assets / "ibfetch.icns")
     icon.save(assets / "ibfetch.ico", sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
+                    "--add-data", certifi.where() + os.pathsep + "certificates",
+                    "--runtime-hook", str(ROOT / "tools/desktop_certificates.py"),
                     "--name", "ibfetch-server", "--distpath", str(ROOT / "build/backend"),
                     "--workpath", str(ROOT / "build/pyinstaller"), "--specpath", str(ROOT / "build"),
                     str(ROOT / "ibfetch.py")], check=True, cwd=ROOT)
@@ -70,7 +78,8 @@ def main():
     licenses.mkdir(parents=True, exist_ok=True)
     for source in (ROOT / "licenses").glob("*.txt"):
         shutil.copy2(source, licenses / source.name)
-    for package, target in (("pyinstaller", "PyInstaller.txt"), ("pyinstaller-hooks-contrib", "PyInstaller-hooks.txt")):
+    for package, target in (("pyinstaller", "PyInstaller.txt"), ("pyinstaller-hooks-contrib", "PyInstaller-hooks.txt"),
+                            ("certifi", "certifi.txt")):
         distribution = metadata.distribution(package)
         source = next(f for f in distribution.files if "/licenses/" in str(f) and Path(f).name in ("COPYING.txt", "LICENSE"))
         shutil.copy2(distribution.locate_file(source), licenses / target)

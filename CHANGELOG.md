@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+- Bundle Mozilla trusted CA certificates in desktop builds so HTTPS and sign-in work
+  without Python or certificate files from the build machine.
+- Preserve explicit SSL_CERT_FILE/SSL_CERT_DIR settings and certificate/hostname checks.
+- Add isolated HTTPS regressions, validate the CA bundle in built/extracted apps, and
+  distinguish certificate verification failures from general connection errors.
+
 ## 1.3.0
 
 - First public release under the MIT license, with macOS Apple Silicon/Intel,
