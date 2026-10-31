@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -2102,6 +2102,7 @@ class App:
         self.session = None
         self.login = None
         self.login_cancel = None
+        self.login_request_id = None
         self.lib = self.meta = None
         self.lib_state, self.lib_error, self.lib_version = "none", "", 0
         self.transfer = None
@@ -2209,15 +2210,28 @@ class App:
             self.login_generation += 1
             generation = self.login_generation
             cancel = self.login_cancel = threading.Event()
+            self.login_request_id = secrets.token_urlsafe(18)
+            self.login = {"state": "starting", "request_id": self.login_request_id}
         client_id = os.environ.get("IBROADCAST_CLIENT_ID") or DEFAULT_CLIENT_ID
-        data = device_start(client_id)
+        try:
+            data = device_start(client_id)
+        except (Fail, OSError) as error:
+            with self.lock:
+                if not cancel.is_set() and generation == self.login_generation and not self.closed:
+                    self.login = {"state": "error", "message": str(error),
+                                  "request_id": self.login_request_id}
+            raise
         with self.lock:
             if cancel.is_set() or generation != self.login_generation or self.closed:
                 return
             self.login = {"state": "waiting", "code": data.get("user_code"),
                           "url": data.get("verification_uri_complete") or data["verification_uri"],
-                          "plain_url": data["verification_uri"]}
+                          "plain_url": data["verification_uri"],
+                          "request_id": self.login_request_id,
+                          "expires_at": time.time() + (number(data.get("expires_in")) or 900)}
+            public = dict(self.login)
         threading.Thread(target=self._poll_login, args=(client_id, data, cancel, generation), daemon=True).start()
+        return public
 
     def _poll_login(self, client_id, data, cancel, generation):
         try:
@@ -2227,19 +2241,28 @@ class App:
                     return
                 write_private(self.home / "tokens.json", json.dumps(tokens, indent=2).encode())
                 self.session, self.login = Session(self.home), None
+                self.login_request_id = None
         except (Fail, OSError) as error:
             with self.lock:
                 if not cancel.is_set() and generation == self.login_generation and not self.closed:
-                    self.login = {"state": "error", "message": str(error)}
+                    self.login = {"state": "error", "message": str(error),
+                                  "request_id": self.login_request_id}
             return
         self.load_library()
 
-    def cancel_login(self):
+    def cancel_login(self, request_id=None):
+        if request_id is not None and (not isinstance(request_id, str)
+                                      or not re.fullmatch(r"[A-Za-z0-9_-]{16,96}", request_id)):
+            raise Fail("Invalid sign-in request.")
         with self.lock:
+            if request_id is not None and request_id != self.login_request_id:
+                return False
+            self.login_request_id = None
             self.login_generation += 1
             if self.login_cancel:
                 self.login_cancel.set()
             self.login = None
+            return True
 
     def sign_out(self):
         with self.lock:
@@ -2518,10 +2541,9 @@ def make_handler(app, token):
             if path == "/api/appearance":
                 return app.set_appearance(body)
             if path == "/api/login":
-                app.start_login()
-                return {}
+                return {"login": app.start_login()}
             if path == "/api/login/cancel":
-                app.cancel_login()
+                app.cancel_login(body.get("request_id"))
                 return {}
             if path == "/api/logout":
                 app.sign_out()
@@ -3069,7 +3091,10 @@ label { display: block; }
 
 /* sign-in */
 .center { min-height: calc(100% - 52px); display: grid; place-items: center; padding: 24px; }
-.signin { max-width: 420px; }
+.signin { max-width: 460px; width: 100%; }
+.signin details { margin-top: 20px; }
+.signin summary { cursor: pointer; color: var(--muted); }
+.signin details p { margin-top: 14px; }
 .signin h1 { font: 600 28px/1.15 var(--round); margin: 0 0 10px; }
 .signin p { color: var(--muted); margin: 0 0 18px; }
 .code {
@@ -3312,17 +3337,21 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   <div class="signin">
     <h1>Sign in to iBroadcast</h1>
     <div id="signinIdle">
-      <p>ibfetch opens iBroadcast's approval page. Approve it there and this page carries on by itself. ibfetch never sees your password.</p>
+      <p>Sign in on the official iBroadcast website in a separate window. Approve the connection and ibfetch continues automatically. Your password stays on iBroadcast.</p>
       <button id="signinBtn" class="primary">Sign in with iBroadcast</button>
     </div>
     <div id="signinWait" hidden>
-      <p>Open iBroadcast and approve ibfetch. If it asks for a code, use this one.</p>
-      <div class="code" id="signinCode"></div>
+      <p id="signinStatus" role="status">Opening the iBroadcast sign-in window…</p>
       <div class="row-gap">
-        <a id="signinLink" class="button" href="#" target="_blank" rel="noopener">Open iBroadcast</a>
+        <button id="signinOpen" class="primary">Open sign-in window</button>
         <button id="signinCancel" class="quiet">Cancel</button>
       </div>
-      <p style="margin-top:14px">Waiting for your approval.</p>
+      <details id="signinFallback">
+        <summary>Use your browser or a code instead</summary>
+        <p>If the sign-in window is unavailable, open iBroadcast in your browser. Enter this code if requested:</p>
+        <div class="code" id="signinCode"></div>
+        <a id="signinLink" class="button" href="#" target="_blank" rel="noopener noreferrer">Open iBroadcast in your browser ↗</a>
+      </details>
     </div>
     <p id="signinError" class="error" role="alert" hidden></p>
   </div>
@@ -3526,17 +3555,23 @@ function notice(text, bad = false) {
 }
 
 /* polling: one loop, poll() just refreshes now */
-let stopped = false;
+let stopped = false, statePollSerial = 0, loginRevision = 0;
 async function poll() {
   const updateRevision = updatePreferenceRevision;
+  const authRevision = loginRevision, serial = ++statePollSerial;
   try {
     const data = await api("/api/state");
+    if (serial !== statePollSerial || authRevision !== loginRevision) return;
     if ((updatePreferencePending || updateRevision !== updatePreferenceRevision) && S?.updates && data.updates)
       data.updates.automatic = S.updates.automatic;
     S = data;
     misses = 0;
     render();
+    // Read the completed state first: closing a popup after approval must never undo sign-in.
+    if (!signInDesktop() && !S.signed_in && S.login?.state === "waiting"
+        && signInFlow.popup?.closed) await cancelSignIn();
   } catch (e) {
+    if (serial !== statePollSerial || authRevision !== loginRevision) return;
     if (++misses >= 3) { stopped = true; showBye(); }
   }
 }
@@ -3640,18 +3675,134 @@ async function saveUpdatePreference() {
   finally { updatePreferencePending = false; updatePreferenceRevision++; $("autoUpdates").disabled = false; }
 }
 
-function renderLogin() {
-  const login = S.login;
-  const waiting = login && login.state === "waiting";
-  $("signinIdle").hidden = !!waiting;
-  $("signinWait").hidden = !waiting;
-  $("signinError").hidden = !(login && login.state === "error");
-  if (login && login.state === "error") $("signinError").textContent = login.message;
-  if (waiting) {
-    $("signinCode").textContent = login.code || "";
-    $("signinLink").href = login.url;
+// A provider window around the existing device flow; tokens stay in Python.
+const signInFlow = {serial: 0, requestId: "", popup: null, opening: false, message: ""};
+function signInDesktop() { return typeof window.ibfetchSignIn?.open === "function"; }
+function signInVerificationUrl(login) {
+  for (const value of [login?.url, login?.plain_url]) {
+    if (typeof value !== "string" || value.length > 8192) continue;
+    try {
+      const url = new URL(value);
+      if (url.origin === "https://oauth.ibroadcast.com" && !url.username && !url.password) return url.href;
+    } catch { /* keep the manual code available for malformed provider links */ }
+  }
+  return "https://oauth.ibroadcast.com/device";
+}
+function reserveSignInPopup() {
+  if (signInDesktop()) return null;
+  try {
+    // Reserve before the asynchronous request so normal browser popup blockers allow it.
+    const popup = window.open("about:blank", "_blank", "popup,width=620,height=800,resizable=yes,scrollbars=yes");
+    if (popup) {
+      popup.opener = null;
+      popup.document.title = "Sign in to iBroadcast";
+      popup.document.body.textContent = "Opening iBroadcast sign-in…";
+    }
+    return popup;
+  } catch { return null; }
+}
+function closeSignInChild() {
+  if (signInFlow.requestId && signInDesktop()) window.ibfetchSignIn.close(signInFlow.requestId);
+  try { signInFlow.popup?.close(); } catch { /* already closed */ }
+  signInFlow.popup = null;
+}
+async function openSignInChild(login, serial, reserved = null) {
+  if (serial !== signInFlow.serial) { try { reserved?.close(); } catch {} return; }
+  signInFlow.requestId = login.request_id || "";
+  let opened = false;
+  if (signInDesktop() && signInFlow.requestId) {
+    try { opened = await window.ibfetchSignIn.open(signInFlow.requestId) === true; } catch { /* browser fallback */ }
+  } else {
+    signInFlow.popup = reserved;
+    try {
+      if (reserved && !reserved.closed) { reserved.location.replace(signInVerificationUrl(login)); opened = true; }
+    } catch { try { reserved?.close(); } catch {} signInFlow.popup = null; }
+  }
+  if (serial !== signInFlow.serial) return;
+  signInFlow.opening = false;
+  signInFlow.message = opened ? "Approve the connection in the iBroadcast sign-in window. ibfetch continues automatically."
+    : "The sign-in window could not be opened. Use your browser or the code below.";
+  $("signinFallback").open = !opened;
+  renderLogin();
+}
+async function beginSignIn() {
+  if (signInFlow.opening) return;
+  const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
+  closeSignInChild(); signInFlow.requestId = ""; signInFlow.popup = reserved;
+  signInFlow.opening = true; signInFlow.message = ""; loginRevision++;
+  if (S) S.login = null;
+  renderLogin();
+  try {
+    const {login} = await api("/api/login", {});
+    if (serial !== signInFlow.serial) {
+      try { reserved?.close(); } catch {}
+      if (login?.request_id) api("/api/login/cancel", {request_id: login.request_id}).catch(() => {});
+      return;
+    }
+    if (!login || login.state !== "waiting") { signInFlow.opening = false; closeSignInChild(); await poll(); return; }
+    if (S) S.login = login;
+    loginRevision++;
+    await openSignInChild(login, serial, reserved);
+    poll();
+  } catch (error) {
+    try { reserved?.close(); } catch {}
+    if (serial !== signInFlow.serial) return;
+    signInFlow.opening = false; signInFlow.popup = null;
+    if (S) S.login = {state: "error", message: error.message};
+    loginRevision++; renderLogin();
   }
 }
+async function reopenSignIn() {
+  const login = S?.login;
+  if (login?.state !== "waiting" || signInFlow.opening) return;
+  if (!signInDesktop() && signInFlow.popup && !signInFlow.popup.closed) {
+    try { signInFlow.popup.focus(); return; } catch { /* reopen below */ }
+  }
+  const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
+  signInFlow.opening = true;
+  await openSignInChild(login, serial, reserved);
+}
+async function cancelSignIn() {
+  const id = signInFlow.requestId || S?.login?.request_id, serial = ++signInFlow.serial;
+  loginRevision++; closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+  try {
+    // A start still in flight cancels its own bound request when its reply arrives.
+    if (id) await api("/api/login/cancel", {request_id: id});
+    if (serial !== signInFlow.serial) return;
+    if (S) S.login = null;
+    loginRevision++; renderLogin(); poll();
+  } catch (error) { if (serial === signInFlow.serial) { renderLogin(); notice(error.message, true); } }
+}
+function renderLogin() {
+  const login = S?.login, waiting = login?.state === "waiting" && !S?.signed_in;
+  const starting = (signInFlow.opening || login?.state === "starting") && !S?.signed_in;
+  if (S?.signed_in || (!starting && !waiting)) {
+    closeSignInChild(); signInFlow.requestId = "";
+    if (S?.signed_in) { signInFlow.serial++; signInFlow.opening = false; }
+  }
+  $("signinIdle").hidden = !!(waiting || starting);
+  $("signinWait").hidden = !(waiting || starting);
+  $("signinBtn").disabled = !!starting;
+  $("signinOpen").disabled = !!starting;
+  $("signinFallback").hidden = !waiting;
+  $("signinError").hidden = login?.state !== "error";
+  if (login?.state === "error") $("signinError").textContent = login.message;
+  $("signinStatus").textContent = starting && !waiting ? "Contacting iBroadcast…" :
+    signInFlow.message || "Waiting for approval. Open the sign-in window, or use your browser below.";
+  if (waiting) {
+    $("signinCode").textContent = login.code || "";
+    $("signinLink").href = signInVerificationUrl(login);
+  }
+}
+if (typeof window.ibfetchSignIn?.onClosed === "function") window.ibfetchSignIn.onClosed(event => {
+  if (event?.requestId !== signInFlow.requestId) return;
+  if (["load-failed", "browser-needed"].includes(event.reason)) {
+    signInFlow.opening = false;
+    signInFlow.message = event.reason === "browser-needed" ? "This sign-in needs your browser. Use the link or code below."
+      : "The sign-in page could not load. Try your browser or the code below.";
+    $("signinFallback").open = true; renderLogin();
+  } else cancelSignIn();
+});
 
 /* library index */
 async function loadMeta(version) {
@@ -4001,10 +4152,9 @@ if (typeof window !== "undefined") window.addEventListener("beforeunload", e => 
     e.preventDefault(); e.returnValue = "";
   }
 });
-$("signinBtn").addEventListener("click", async () => {
-  try { await api("/api/login", {}); poll(); } catch (e) { notice(e.message, true); }
-});
-$("signinCancel").addEventListener("click", async () => { await api("/api/login/cancel", {}).catch(() => {}); poll(); });
+$("signinBtn").addEventListener("click", beginSignIn);
+$("signinOpen").addEventListener("click", reopenSignIn);
+$("signinCancel").addEventListener("click", cancelSignIn);
 $("signoutBtn").addEventListener("click", async () => {
   if (!confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
   try {

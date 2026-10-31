@@ -24,7 +24,7 @@ class Backend {
   start() {
     return new Promise((resolve, reject) => {
       this.child = spawn(this.command.file, this.command.args, {cwd: this.cwd,
-        env: {...this.env, PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1"},
+        env: {...Object.fromEntries(Object.entries(this.env).filter(([key]) => !/^(CSC_|WIN_CSC_|APPLE_)/.test(key))), PYTHONUNBUFFERED: "1", PYTHONDONTWRITEBYTECODE: "1"},
         windowsHide: true, stdio: ["pipe", "pipe", "pipe"]});
       this.child.stderr.resume(); // Never display account data or private URLs from stderr.
       this.child.stdin.on("error", () => {});

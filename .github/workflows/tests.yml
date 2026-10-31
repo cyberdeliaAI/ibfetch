@@ -36,4 +36,4 @@ jobs:
         with:
           node-version: "22"
       - run: node --test tests/frontend.test.cjs
-      - run: node --test electron/tests/shell.test.cjs
+      - run: node --test electron/tests/*.test.cjs

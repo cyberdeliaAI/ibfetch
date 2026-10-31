@@ -10,7 +10,7 @@ const python = fs.readFileSync(path.join(__dirname, "..", "ibfetch.py"), "utf8")
 const scripts = [...python.split('PAGE = r"""')[1].matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
 const script = scripts[scripts.length - 1];
 
-function harness({events = false, appearance = "auto", palette = "forest", dark = false} = {}) {
+function harness({events = false, appearance = "auto", palette = "forest", dark = false, window = {open:()=>null}} = {}) {
   const nodes = new Map();
   function node(id) {
     if (!nodes.has(id)) nodes.set(id, {
@@ -27,7 +27,7 @@ function harness({events = false, appearance = "auto", palette = "forest", dark 
     querySelector: selector => ({content:selector.includes("appearance") ? appearance : selector.includes("palette") ? palette : "test-token"}),
     querySelectorAll: () => [], addEventListener(type,callback) { this.listeners[type] = callback; }};
   const context = vm.createContext({
-    document, matchMedia: () => media,
+    document, window: {addEventListener(){},...window}, URL, matchMedia: () => media,
     setTimeout() { return 1; }, clearTimeout() {}, confirm() { return true; },
     fetch() { throw new Error("Unexpected network request"); }, console,
   });
@@ -297,4 +297,82 @@ test("rendering another account clears stale browser selections", () => {
   assert.equal(h.run("checked.size"), 0);
   assert.equal(h.run("expanded.size"), 0);
   assert.equal(h.run("meta"), null);
+});
+
+const pendingLogin = id => ({state:"waiting",request_id:id,code:"TEST-CODE",
+  url:"https://oauth.ibroadcast.com/device?user_code=TEST-CODE",expires_at:Date.now()/1000+600});
+function popup() {
+  return {closed:false,document:{body:{}},location:{replace(url){this.url=url;}},
+    close(){this.closed=true;},focus(){this.focused=true;}};
+}
+test("browser sign-in reserves a popup during the click and shows the provider after the code arrives", async () => {
+  const child=popup(), calls=[];
+  const h=harness({window:{open(){calls.push("popup");return child;}}});
+  h.run(`S={signed_in:false,login:null}; poll=()=>{};
+    api=()=>new Promise(resolve=>{globalThis.finishStart=resolve;});`);
+  const started=h.run("beginSignIn()");
+  assert.deepEqual(calls,["popup"]);
+  assert.equal(child.opener,null);
+  assert.equal(h.node("signinBtn").disabled,true);
+  h.run(`finishStart({login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await started;
+  assert.equal(child.location.url,pendingLogin().url);
+  assert.equal(h.node("signinFallback").open,false);
+  assert.equal(h.node("signinCode").textContent,"TEST-CODE");
+});
+test("blocked popups and malformed provider links retain a safe browser/code fallback", async () => {
+  const h=harness();
+  h.run(`S={signed_in:false,login:null};poll=()=>{};
+    api=async()=>({login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await h.run("beginSignIn()");
+  assert.equal(h.node("signinFallback").open,true);
+  assert.equal(h.node("signinLink").href,pendingLogin().url);
+  assert.equal(h.run('signInVerificationUrl({url:"javascript:alert(1)",plain_url:"https://evil.test"})'),"https://oauth.ibroadcast.com/device");
+});
+test("desktop sign-in sends only an opaque attempt ID and completion closes its window", async () => {
+  const opened=[],closed=[];
+  const h=harness({window:{ibfetchSignIn:{open:async id=>{opened.push(id);return true;},close:id=>closed.push(id)}}});
+  h.run(`S={signed_in:false,login:null};poll=()=>{};
+    api=async()=>({login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await h.run("beginSignIn()");
+  assert.deepEqual(opened,["a".repeat(24)]);
+  h.run("S.signed_in=true;S.login=null;renderLogin();");
+  assert.deepEqual(closed,["a".repeat(24)]);
+});
+test("cancelling an in-flight start cancels only its late attempt, never a newer login", async () => {
+  const child=popup();
+  const h=harness({window:{open:()=>child}});
+  h.run(`S={signed_in:false,login:null};poll=()=>{};
+    api=()=>new Promise(resolve=>{globalThis.finishStart=resolve;});`);
+  const started=h.run("beginSignIn()");
+  await h.run("cancelSignIn()");
+  h.run(`globalThis.cancellations=[];api=async(path,body)=>{cancellations.push(body.request_id);};
+    finishStart({login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await started;
+  assert.equal(child.closed,true);
+  assert.deepEqual(JSON.parse(h.run("JSON.stringify(cancellations)")),["a".repeat(24)]);
+  assert.equal(h.run("S.login"),null);
+});
+test("stale polling cannot restore a cancelled sign-in or reopen its popup", async () => {
+  const h=harness();
+  h.run(`S={signed_in:false,login:${JSON.stringify(pendingLogin("a".repeat(24)))}};render=()=>{};
+    api=()=>new Promise(resolve=>{globalThis.oldState=resolve;});`);
+  const old=h.run("poll()");
+  h.run("api=async(path)=>path==='/api/state'?{signed_in:false,login:null}:{};");
+  await h.run("cancelSignIn()");
+  h.run(`oldState({signed_in:false,login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await old;
+  assert.equal(h.run("S.login"),null);
+});
+test("provider-window failures offer browser fallback and ignore stale close events", async () => {
+  let callback;
+  const h=harness({window:{ibfetchSignIn:{open:async()=>true,close(){},onClosed(fn){callback=fn;}}}});
+  h.run(`S={signed_in:false,login:${JSON.stringify(pendingLogin("a".repeat(24)))}};
+    signInFlow.requestId="${"a".repeat(24)}";`);
+  callback({requestId:"b".repeat(24),reason:"closed"});
+  assert.equal(h.run("S.login.state"),"waiting");
+  callback({requestId:"a".repeat(24),reason:"load-failed"});
+  assert.equal(h.node("signinFallback").open,true);
+  assert.match(h.node("signinStatus").textContent,/could not load/);
+  assert.equal(h.run("S.login.state"),"waiting");
 });

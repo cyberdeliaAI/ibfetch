@@ -49,11 +49,14 @@ test("packaged applications always use the bundled backend", () => {
   assert.deepEqual(command.args,["--desktop-host"]);
 });
 
-test("the shell has no Node bridge, webviews or disabled web security", () => {
+test("the shell exposes only sign-in operations with no Node access or webviews", () => {
   const source=fs.readFileSync(path.join(__dirname,"../main.cjs"),"utf8");
   for(const setting of ["nodeIntegration: false", "contextIsolation: true", "sandbox: true", "webSecurity: true", "webviewTag: false"])
     assert.ok(source.includes(setting));
-  assert.ok(!source.includes("preload:"));
+  assert.ok(source.includes('preload: path.join(__dirname, "sign-in-preload.cjs")'));
+  const bridge=fs.readFileSync(path.join(__dirname,"../sign-in-preload.cjs"),"utf8");
+  assert.ok(bridge.includes('exposeInMainWorld("ibfetchSignIn"'));
+  assert.ok(!bridge.includes("sendSync") && !bridge.includes("access_token") && !bridge.includes("shell"));
 });
 
 test("a real source backend starts with a temporary home and exits on parent EOF", async () => {
@@ -100,4 +103,14 @@ test("closing terminates only its owned backend when a worker is stuck in a sock
     await backend.stop();
     fs.rmSync(home,{recursive:true,force:true});
   }
+});
+
+test("the backend process never inherits Apple signing credentials", async () => {
+  const os=require("node:os"), home=fs.mkdtempSync(path.join(os.tmpdir(),"ibfetch-signing-env-"));
+  const sourceRoot=path.resolve(__dirname,"../.."), version=info.version;
+  const code=`import os,json,sys\nassert not any(k.startswith(('CSC_','WIN_CSC_','APPLE_')) for k in os.environ)\nprint(json.dumps(dict(event='ready',app='ibfetch',protocol=1,version=${JSON.stringify(version)},url='http://127.0.0.1:12345/?t=abcdefghijklmnopqrstuvwxyz')),flush=True)\nsys.stdin.buffer.read(1)`;
+  const python=backendCommand({packaged:false,sourceRoot,python:process.env.IBFETCH_PYTHON}).file;
+  const backend=new Backend({file:python,args:["-B","-c",code]},{version,cwd:sourceRoot,
+    env:{...process.env,APPLE_ID:"synthetic",APPLE_APP_SPECIFIC_PASSWORD:"synthetic",CSC_LINK:"synthetic",WIN_CSC_LINK:"synthetic"}});
+  try { await backend.start(); } finally { await backend.stop();fs.rmSync(home,{recursive:true,force:true}); }
 });

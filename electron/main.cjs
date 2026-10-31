@@ -5,11 +5,12 @@ const path = require("node:path");
 const {Backend, backendCommand} = require("./backend.cjs");
 const {applicationUrl, externalUrl} = require("./security.cjs");
 const info = require("./package.json");
+const {installSignIn} = require("./sign-in.cjs");
 
 app.setName("ibfetch");
 if (process.env.IBFETCH_ELECTRON_PROFILE) app.setPath("userData", path.resolve(process.env.IBFETCH_ELECTRON_PROFILE));
 app.enableSandbox();
-let window, backend, origin, finished = false, stopping;
+let window, backend, origin, signIn, finished = false, stopping;
 
 function openExternal(value) {
   const safe = externalUrl(value);
@@ -30,10 +31,12 @@ function createWindow(url) {
   });
   window = new BrowserWindow({title: "ibfetch", width: 1320, height: 850, minWidth: 420,
     minHeight: 600, show: false, backgroundColor: "#121915", webPreferences: {
+      preload: path.join(__dirname, "sign-in-preload.cjs"),
       partition: "persist:ibfetch", nodeIntegration: false, contextIsolation: true,
       sandbox: true, webSecurity: true, webviewTag: false, devTools: !app.isPackaged,
       allowRunningInsecureContent: false,
     }});
+  signIn = installSignIn(window, url);
   const contents = window.webContents;
   contents.setWindowOpenHandler(({url: value}) => { openExternal(value); return {action: "deny"}; });
   contents.on("will-navigate", (event, value) => {
@@ -79,6 +82,7 @@ else {
       {role: "editMenu"}, {label: "View", submenu: [{role: "resetZoom"}, {role: "zoomIn"}, {role: "zoomOut"}, {role: "togglefullscreen"}]},
     ]));
     createWindow(ready.url);
+    if (process.env.IBFETCH_SIGN_IN_SMOKE_REPORT) require("./sign-in-smoke.cjs").check({app, window, backend, signIn});
     if (process.env.IBFETCH_SMOKE_REPORT) require("./smoke.cjs").check({app, window, backend});
   }).catch(() => { dialog.showErrorBox("Could not start ibfetch", "The bundled local server could not start. Restart the app."); app.quit(); });
 }

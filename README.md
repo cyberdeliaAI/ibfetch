@@ -241,11 +241,19 @@ Everything below works without the app.
 
 ### Sign in
 
+The desktop app opens the official iBroadcast sign-in page in a separate, isolated
+window and returns to ibfetch after approval. The Python/browser version opens a
+popup. If a popup is blocked or the provider requires your normal browser, choose
+**Use your browser or a code instead**. Closing or cancelling the window stops only
+that sign-in attempt; an already approved connection is preserved. iBroadcast's
+remembered website sign-in stays in a separate desktop profile, so the first login
+may still ask for your account details. Passwords stay on iBroadcast.
+
 ```bash
 ibfetch login
 ```
 
-It prints a link and a code. Open the link, approve ibfetch and you're done. The sign-in is saved and refreshed automatically.
+The terminal command prints a link and a code. Open the link, approve ibfetch and you're done. The sign-in is saved and refreshed automatically.
 
 ibfetch currently uses the same public OAuth client ID as Tagcast, so the approval
 page can show Tagcast. Tagcast does not need to be installed. To use your own

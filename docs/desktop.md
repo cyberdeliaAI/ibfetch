@@ -141,3 +141,21 @@ configured; it does not depend on the build machine's Python certificate paths.
   tests keep the renderer sandbox enabled.
 
 See [Electron's security guidance](https://www.electronjs.org/docs/latest/tutorial/security).
+
+## Separate sign-in window
+
+Sign in opens the official HTTPS iBroadcast page in a child window with its own
+persistent cookie partition. It has no preload, Node access or app API access.
+The trusted local page has a narrow sign-in-only bridge: open/close by opaque
+attempt ID and window-close notifications. The main process reads the validated
+provider URL from the authenticated local backend; JavaScript never supplies a
+remote URL or receives OAuth tokens through this bridge.
+
+Approval closes the child and returns focus to the main window. Closing it cancels
+only the matching pending attempt. Expiry, denial and load failures return to the
+app; the normal browser and manual code remain available. Existing saved ibfetch
+sessions are unchanged. The terminal continues to print its approval link/code.
+
+Developer ID build preparation and required secrets are documented in
+[code-signing.md](code-signing.md). Signed status must describe the actual release
+assets; adding this recipe does not change existing unsigned downloads.
