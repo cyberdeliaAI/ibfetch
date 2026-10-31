@@ -3557,11 +3557,12 @@ function notice(text, bad = false) {
 /* polling: one loop, poll() just refreshes now */
 let stopped = false, statePollSerial = 0, loginRevision = 0;
 async function poll() {
+  if (stopped) return;
   const updateRevision = updatePreferenceRevision;
   const authRevision = loginRevision, serial = ++statePollSerial;
   try {
     const data = await api("/api/state");
-    if (serial !== statePollSerial || authRevision !== loginRevision) return;
+    if (stopped || serial !== statePollSerial || authRevision !== loginRevision) return;
     if ((updatePreferencePending || updateRevision !== updatePreferenceRevision) && S?.updates && data.updates)
       data.updates.automatic = S.updates.automatic;
     S = data;
@@ -3571,7 +3572,7 @@ async function poll() {
     if (!signInDesktop() && !S.signed_in && S.login?.state === "waiting"
         && signInFlow.popup?.closed) await cancelSignIn();
   } catch (e) {
-    if (serial !== statePollSerial || authRevision !== loginRevision) return;
+    if (stopped || serial !== statePollSerial || authRevision !== loginRevision) return;
     if (++misses >= 3) { stopped = true; showBye(); }
   }
 }
@@ -3583,6 +3584,8 @@ async function loop() {
 }
 
 function showBye() {
+  ++signInFlow.serial; loginRevision++;
+  closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
   setThemeMenu(false);
   setUpdatePanel(false);
   for (const id of ["app", "signin"]) $(id).hidden = true;

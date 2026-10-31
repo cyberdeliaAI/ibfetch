@@ -376,3 +376,18 @@ test("provider-window failures offer browser fallback and ignore stale close eve
   assert.match(h.node("signinStatus").textContent,/could not load/);
   assert.equal(h.run("S.login.state"),"waiting");
 });
+
+
+test("quitting closes the sign-in popup and discards a late state response", async () => {
+  const child=popup(), h=harness({window:{open:()=>child}});
+  h.run(`S={signed_in:false,login:null}; signInFlow.popup=null;
+    api=()=>new Promise(resolve=>{globalThis.finishState=resolve;});`);
+  const pending=h.run("poll()");
+  h.run("signInFlow.popup = window.open(); stopped=true;showBye();");
+  h.run(`finishState({signed_in:false,login:${JSON.stringify(pendingLogin("a".repeat(24)))}});`);
+  await pending;
+  assert.equal(child.closed,true);
+  assert.equal(h.node("signin").hidden,true);
+  assert.equal(h.node("bye").hidden,false);
+  assert.equal(h.run("S.login"),null);
+});
