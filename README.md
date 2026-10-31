@@ -72,13 +72,13 @@ JSON manifest records download identity and integrity; it never writes tags or a
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.4.0 | Open after extracting |
+| System | Download for 1.5.0 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
@@ -98,7 +98,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.4.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.5.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
