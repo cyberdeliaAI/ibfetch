@@ -63,7 +63,7 @@ class SigningTests(unittest.TestCase):
                 patch.object(build.subprocess, "run", return_value=Mock(stdout="", stderr=good)) as run:
             build.verify_macos_app(Path("synthetic.app"), "TESTTEAM12")
             commands = [c.args[0] for c in run.call_args_list]
-            self.assertTrue(any(cmd[-1].endswith("backend/ibfetch-server") for cmd in commands))
+            self.assertTrue(any(Path(cmd[-1]).parts[-2:] == ("backend", "ibfetch-server") for cmd in commands))
             self.assertTrue(any("stapler" in cmd for cmd in commands))
             self.assertTrue(any(cmd[0] == "spctl" for cmd in commands))
             self.assertTrue((Path(tmp) / "build/reports/macos-signing.json").exists())
