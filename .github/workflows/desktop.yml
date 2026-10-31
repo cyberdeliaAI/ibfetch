@@ -2,6 +2,11 @@ name: Desktop builds
 
 on:
   workflow_dispatch:
+    inputs:
+      sign_macos:
+        description: Require signed and notarized macOS artifacts
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -12,7 +17,7 @@ jobs:
   desktop:
     name: Desktop ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +44,7 @@ jobs:
       - name: Use the selected Python for source-host tests
         run: python -c "import os, sys; open(os.environ['GITHUB_ENV'], 'a').write('IBFETCH_PYTHON=' + sys.executable + '\n')"
       - run: python -B -m unittest discover -s tests -q
-      - run: node --test tests/frontend.test.cjs electron/tests/shell.test.cjs
+      - run: node --test tests/frontend.test.cjs electron/tests/*.test.cjs
       - name: Virtual display for desktop smoke checks
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
@@ -47,10 +52,24 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a python tools/build_desktop.py
       - name: Build and test extracted standalone archive
-        if: runner.os != 'Linux'
+        if: runner.os != 'Linux' && !(runner.os == 'macOS' && inputs.sign_macos == true)
         run: python tools/build_desktop.py
+      - name: Build signed and notarized macOS app and verify extracted archive
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.sign_macos == true
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: python tools/build_desktop.py --sign-macos
       - uses: actions/upload-artifact@v4
         with:
           name: ibfetch-${{ matrix.target }}
           path: dist/*
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ibfetch-${{ matrix.target }}-verification
+          path: build/reports/*.json
           retention-days: 14

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+
+- Open iBroadcast sign-in in an isolated desktop window, close it after approval and return to ibfetch.
+- Open a separate popup in the Python/browser version, keeping browser and code fallbacks.
+- Bind cancellation to the current attempt so a late window-close cannot cancel a newer login.
+- Keep provider cookies in a separate desktop profile; passwords and tokens never enter the app page.
+- Prepare explicit Developer ID signed and notarized macOS builds, with signature, ticket and Gatekeeper verification.
+- Keep signing credentials out of dependency installs, Python freezing and launched apps.
+
 ## 1.4.0
 
 - Add the official, unmodified Powered by iBroadcast logos and clear independent-app attribution.

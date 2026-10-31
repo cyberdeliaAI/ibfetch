@@ -72,13 +72,13 @@ JSON manifest records download identity and integrity; it never writes tags or a
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.4.0 | Open after extracting |
+| System | Download for 1.5.0 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.4.0/ibfetch-1.4.0-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
@@ -98,7 +98,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.4.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.5.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -241,11 +241,19 @@ Everything below works without the app.
 
 ### Sign in
 
+The desktop app opens the official iBroadcast sign-in page in a separate, isolated
+window and returns to ibfetch after approval. The Python/browser version opens a
+popup. If a popup is blocked or the provider requires your normal browser, choose
+**Use your browser or a code instead**. Closing or cancelling the window stops only
+that sign-in attempt; an already approved connection is preserved. iBroadcast's
+remembered website sign-in stays in a separate desktop profile, so the first login
+may still ask for your account details. Passwords stay on iBroadcast.
+
 ```bash
 ibfetch login
 ```
 
-It prints a link and a code. Open the link, approve ibfetch and you're done. The sign-in is saved and refreshed automatically.
+The terminal command prints a link and a code. Open the link, approve ibfetch and you're done. The sign-in is saved and refreshed automatically.
 
 ibfetch currently uses the same public OAuth client ID as Tagcast, so the approval
 page can show Tagcast. Tagcast does not need to be installed. To use your own

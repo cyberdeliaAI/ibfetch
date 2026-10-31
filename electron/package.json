@@ -1,7 +1,7 @@
 {
   "name": "ibfetch-desktop",
   "productName": "ibfetch",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Download selected iBroadcast music in a standalone desktop window.",
   "author": "Cyberdelia",
   "license": "MIT",
