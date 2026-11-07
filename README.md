@@ -457,3 +457,9 @@ MediaSync Lite uses the same download service for the whole library at once, in 
 
 ibfetch is [MIT licensed](LICENSE). Desktop downloads include third-party license
 notices in their resources folder; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+
+For resumed streaming downloads, ibfetch checks the original total size and any
+saved ETag/Last-Modified validator before appending. Older `.part` files without
+that original size are preserved with an explanation; use another output folder
+to restart that track. Completed downloads remain recognized. A local disk or
+permission error stops the batch; fix the folder/disk and retry.

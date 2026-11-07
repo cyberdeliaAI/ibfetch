@@ -42,5 +42,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Install fixed JavaScript test/build dependencies without running package scripts
+        working-directory: electron
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - run: node --test tests/frontend.test.cjs
       - run: node --test electron/tests/*.test.cjs
