@@ -2,6 +2,8 @@
 
 ## 1.6.0
 
+- Ship Developer ID signed and Apple-notarized Mac downloads for Apple Silicon and Intel.
+
 - Update Electron to 44.10.2 and electron-builder to 26.18.0; patch affected minimatch build dependencies.
 - Remember main/sign-in window sizes, clamp them to the current screen and retain normal dimensions across fullscreen.
 - Validate original size and available remote validators before resuming streamed audio; preserve unsafe older partials.

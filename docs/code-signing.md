@@ -1,8 +1,9 @@
 # macOS Developer ID signing and notarization
 
-This recipe is explicit build support. Existing 1.4.0 release assets are unchanged.
-A local Developer ID certificate alone does not establish notarization or give
-GitHub runners access to the certificate's private key.
+The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
+including attached tickets and verification of the extracted archives. Historical
+release assets remain unchanged. A local certificate alone does not establish
+notarization or give GitHub runners access to its private key.
 
 Configure the following GitHub Actions secrets in the **ibfetch** repository:
 

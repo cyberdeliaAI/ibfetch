@@ -24,11 +24,11 @@ owned backend. Saved music and sign-in settings survive an upgrade/uninstall.
 
 ### macOS
 
-The app is ad-hoc signed, without Apple Developer ID signing or notarization.
-After attempting to open a trusted download, open **System Settings > Privacy &
-Security**, find ibfetch's notice and choose **Open Anyway**. Confirm this app in
-the next prompt. Keep the overall system security settings enabled. Follow
-[Apple's instructions](https://support.apple.com/en-gb/102445).
+The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
+with the ticket attached. Move `ibfetch.app` to Applications and open it. Confirm
+macOS's normal first-launch prompt for a downloaded app if shown. Keep the overall
+system security settings enabled. Historical downloads retain their original
+signatures; see [signing details](code-signing.md).
 
 For Homebrew, use `brew install --cask cyberdeliaAI/apps/ibfetch`. This installs
 ibfetch.app and links the bundled `ibfetch-cli`. Stop an older copy and move a
@@ -48,7 +48,7 @@ computer may prohibit unsigned apps. Do not disable system-wide protections.
 Extract and run from a graphical desktop:
 
 ```sh
-tar -xzf ibfetch-1.5.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.6.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -63,20 +63,20 @@ Each release archive has a .sha256 companion. Keep both in the same folder.
 macOS:
 
 ```sh
-shasum -a 256 -c ibfetch-1.5.0-macos-arm64.zip.sha256
+shasum -a 256 -c ibfetch-1.6.0-macos-arm64.zip.sha256
 ```
 
 Linux:
 
 ```sh
-sha256sum -c ibfetch-1.5.0-linux-x64.tar.gz.sha256
+sha256sum -c ibfetch-1.6.0-linux-x64.tar.gz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\ibfetch-1.5.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\ibfetch-1.5.0-windows-x64.zip.sha256
+Get-FileHash .\ibfetch-1.6.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\ibfetch-1.6.0-windows-x64.zip.sha256
 ```
 
 Compare the 64-character digest exactly. A checksum checks download integrity;
@@ -115,7 +115,8 @@ The script builds Python with PyInstaller, installs locked Electron dependencies
 packages the app, Mozilla CA certificates and runtime notices, validates its trusted
 HTTPS roots, tests its isolated renderer, archives it,
 checks the extracted archive, and writes its SHA-256 companion. macOS also checks
-the ad-hoc signature. Pillow packages the original ibfetch PNG artwork into the native icon formats at build time.
+the signature; explicit signed builds also require Developer ID, a notarization ticket
+and Gatekeeper acceptance. Pillow packages the original ibfetch PNG artwork into the native icon formats at build time.
 
 The Desktop builds workflow makes all four native archives. Releases use verified
 archives from a successful run; Python/browser ZIPs contain the standalone file,
@@ -130,8 +131,10 @@ configured; it does not depend on the build machine's Python certificate paths.
 - One Electron instance owns a fresh random-port loopback backend; unrelated
   browser servers are never reused or killed.
 - The renderer has sandbox, context isolation and web security enabled, with Node
-  integration, webviews and arbitrary navigation disabled. There is no preload/IPC
-  bridge. Only its own backend and external iBroadcast approval are allowed.
+  integration, webviews and arbitrary navigation disabled. The trusted app page
+  has only the narrow sign-in bridge described below; the provider window has none.
+  External links are restricted to iBroadcast approval/attribution and fixed project
+  release, Tests and MIT-license pages.
 - The shared page uses hashed inline scripts, a private per-run URL, authenticated
   API calls and no-store/no-referrer headers. Credentials stay in Python.
 - Close warns for an unsent queue or download, then requests graceful shutdown.
@@ -156,7 +159,7 @@ only the matching pending attempt. Expiry, denial and load failures return to th
 app; the normal browser and manual code remain available. Existing saved ibfetch
 sessions are unchanged. The terminal continues to print its approval link/code.
 
-Developer ID build preparation and required secrets are documented in
+Developer ID build instructions and required secrets are documented in
 [code-signing.md](code-signing.md). Signed status must describe the actual release
 assets; adding this recipe does not change existing unsigned downloads.
 
