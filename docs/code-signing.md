@@ -60,9 +60,9 @@ Publish a new draft only after the source checks and all four native targets for
 the reviewed version pass; verify every uploaded digest before making it public.
 Never overwrite existing release downloads with an ordinary unsigned rebuild.
 
-On GitHub's hosted Intel Mac runner, the explicit signed job temporarily blocks
+On GitHub's hosted Mac runners, explicit signed jobs temporarily block
 outbound UDP port 443 so Apple's ticket lookup uses HTTPS over TCP. This follows
 [the runner maintainers' workaround](https://github.com/actions/runner-images/issues/14924)
-for dropped HTTP/3 connections. It applies only to that disposable runner; local
+for dropped HTTP/3 connections, observed on both Mac architectures. It applies only to that disposable runner; local
 builds and installed apps do not change network settings. All signature, ticket,
 TLS and Gatekeeper checks remain mandatory.
