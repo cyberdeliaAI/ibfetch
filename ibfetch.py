@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -82,6 +82,10 @@ FORMAT_NAMES = {"mp3": "MP3", "flac": "FLAC", "m4a": "M4A", "aac": "AAC", "ogg":
 
 class Fail(Exception):
     """A problem to report to the user without a traceback."""
+
+
+class TerminalTransferError(Fail):
+    """Stop the batch until its authentication or secure connection is restored."""
 
 
 # -- small helpers ------------------------------------------------------------
@@ -198,7 +202,16 @@ def write_private(path, data):
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        os.replace(tmp, path)
+        for attempt in range(6):
+            try:
+                os.replace(tmp, path)
+                break
+            except OSError as error:
+                # Windows scanners/readers can briefly deny an atomic rename even
+                # while our own writers are serialized. Never delete the baseline.
+                if getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 5:
+                    raise
+                time.sleep(0.05 * (2 ** attempt))
     finally:
         try:
             tmp.unlink()
@@ -250,12 +263,31 @@ def as_json(raw):
 NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError, OSError, HTTPException)
 
 
+LOCAL_FILE_ERRNOS = {getattr(errno, name) for name in
+                     ("ENOSPC", "EACCES", "EIO", "EROFS", "EDQUOT", "ENAMETOOLONG",
+                      "ENOENT", "ENOTDIR", "EISDIR", "EMFILE", "ENFILE") if hasattr(errno, name)}
+
+
+def local_file_error(error):
+    # urllib/socket exceptions also inherit OSError. Do not turn a transport timeout
+    # or reset into a terminal disk error merely because it carries an errno.
+    return (isinstance(error, OSError) and not isinstance(error, (urllib.error.URLError, TimeoutError, ConnectionError))
+            and error.errno in LOCAL_FILE_ERRNOS)
+
+
 def connection_error(error, service="iBroadcast"):
     reason = getattr(error, "reason", error)
     if isinstance(reason, ssl.SSLCertVerificationError):
         return (f"Could not verify {service}'s HTTPS certificate. Update the desktop app, "
                 "or check your Python installation's trusted certificates.")
     return f"Could not reach {service} ({error.__class__.__name__})."
+
+
+def check_transfer_error(error):
+    if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
+        raise TerminalTransferError(connection_error(error)) from None
+    if local_file_error(error):
+        raise error
 
 
 RELEASES_URL = "https://github.com/cyberdeliaAI/ibfetch/releases"
@@ -414,6 +446,7 @@ def oauth_post(path, form):
                         {"Content-Type": "application/x-www-form-urlencoded"}, 45)
         return status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
+        check_transfer_error(error)
         raise Fail(connection_error(error, "iBroadcast sign-in")) from None
 
 
@@ -433,6 +466,7 @@ def device_start(client_id):
         response = http("GET", f"{OAUTH_URL}/device/code?{query}", timeout=45)
         code, data = status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
+        check_transfer_error(error)
         raise Fail(connection_error(error, "iBroadcast sign-in")) from None
     if code >= 400 or not data.get("device_code"):
         raise Fail(f"iBroadcast refused the sign-in request (HTTP {code}). Check the client ID.")
@@ -504,12 +538,15 @@ class Session:
     def _refresh_locked(self):
         refresh_token = self.tokens.get("refresh_token")
         if not refresh_token or not self.tokens.get("client_id"):
-            raise Fail("Your iBroadcast session expired. Run: ibfetch login")
+            raise TerminalTransferError("Your iBroadcast session expired. Run: ibfetch login")
         code, data = oauth_post("token", {"grant_type": "refresh_token",
                                           "client_id": self.tokens["client_id"],
                                           "refresh_token": refresh_token})
-        if code >= 400 or not data.get("access_token"):
-            raise Fail("Your iBroadcast session expired. Run: ibfetch login")
+        if code >= 400 and data.get("error") in ("invalid_grant", "invalid_token"):
+            raise TerminalTransferError("Your iBroadcast session expired. Run: ibfetch login")
+        if code >= 400 or not isinstance(data.get("access_token"), str) or not data["access_token"]:
+            raise Fail("iBroadcast sign-in renewal is temporarily unavailable. "
+                       "Try again later; your sign-in is retained.")
         self.tokens = token_record(data, self.tokens["client_id"], refresh_token)
         write_private(self.path, json.dumps(self.tokens, indent=2).encode())
 
@@ -540,8 +577,11 @@ class Session:
             headers = {"Range": f"bytes={offset}-"} if offset else {}
             response = http("GET", f"{STREAM_URL}{path}?{urllib.parse.urlencode(params)}",
                             headers=headers, timeout=120)
-            if status_of(response) not in (401, 403) or attempt == 2:
+            if status_of(response) not in (401, 403):
                 return response
+            if attempt == 2:
+                response.close()
+                raise TerminalTransferError("iBroadcast rejected the session. Sign in again before restarting downloads.")
             response.close()
             token = self.refresh(token)
 
@@ -566,6 +606,8 @@ class Session:
             if refused and attempt == 1:
                 token = self.refresh(token)
                 continue
+            if refused:
+                raise TerminalTransferError("iBroadcast rejected the session. Sign in again before restarting downloads.")
             message = text(answer.get("message")).strip()[:200] or f"HTTP {code}"
             raise ServiceError(f"iBroadcast's download service refused it ({message})",
                                retry=code == 429 or code >= 500)
@@ -1595,6 +1637,8 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                     continue
                 break
             except NETWORK_ERRORS as error:
+                # Preserve filesystem failures; socket errors remain retryable.
+                check_transfer_error(error)
                 note = f"network error ({error.__class__.__name__})"
                 continue
             digest = hashlib.sha256()
@@ -1609,6 +1653,8 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                     continue
                 break
             except NETWORK_ERRORS as error:
+                # Preserve filesystem failures; socket errors remain retryable.
+                check_transfer_error(error)
                 note = f"connection dropped ({error.__class__.__name__})"
                 continue
             if length is None:
@@ -1625,6 +1671,19 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
     if not path:
         return "fail", 0, "no stream path in the library, try refreshing the library"
     note = "failed"
+
+    def resume_error(total, headers):
+        previous = read_object(part_record)
+        known = previous.get("total")
+        if type(known) is not int or known <= 0:
+            return "cannot safely resume this older partial without its original size; partial preserved, choose another folder to restart"
+        if known != total:
+            return "remote file size changed; partial preserved, choose another folder to restart"
+        for key, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
+            if previous.get(key) and previous[key] != headers.get(header):
+                return "remote file identity changed or is unavailable; partial preserved, choose another folder to restart"
+        return ""
+
     for attempt in range(4):
         if stop.is_set():
             return "stopped", 0, ""
@@ -1634,6 +1693,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
         try:
             response = session.stream(path, track_id, lib.user_id, lib.expires, offset)
         except NETWORK_ERRORS as error:
+            check_transfer_error(error)
             note = f"network error ({error.__class__.__name__})"
             continue
         with response:
@@ -1641,6 +1701,9 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
             if code == 416 and offset:
                 total = re.fullmatch(r"bytes \*/(\d+)", response.headers.get("Content-Range") or "")
                 if total and int(total.group(1)) == offset:
+                    error = resume_error(offset, response.headers)
+                    if error:
+                        return "fail", 0, error
                     return finish(fallback)
                 return "fail", 0, "server range does not confirm the partial file is complete"
             if code in (401, 403):
@@ -1654,14 +1717,21 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                 return "fail", 0, "iBroadcast returned a non-audio response"
             if code == 200:
                 offset = 0  # the server sent the whole file, start over
-            expected = number(response.headers.get("Content-Length"))
+            raw_expected = response.headers.get("Content-Length")
+            if raw_expected is not None and not re.fullmatch(r"\d+", str(raw_expected)):
+                return "fail", 0, "server returned an invalid Content-Length"
+            expected = number(raw_expected)
             if code == 206:
                 match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range") or "")
                 if not match:
                     return "fail", 0, "missing or invalid Content-Range on resumed download"
                 start, end, total = map(int, match.groups())
-                if start != offset or end < start or end >= total or (expected and expected != end - start + 1):
+                if start != offset or end < start or end >= total or (raw_expected is not None and expected != end - start + 1):
                     return "fail", 0, "server returned an unexpected byte range"
+                if offset:
+                    error = resume_error(total, response.headers)
+                    if error:
+                        return "fail", 0, error
                 expected = end - start + 1
             else:
                 total = expected
@@ -1670,8 +1740,15 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                 if stop.is_set():
                     return "stopped", 0, ""
                 checksum = checksum_for(offset)
-                if not part.exists():
-                    write_private(part_record, json.dumps({"identity": identity}).encode())
+                # Persist the response's continuity information before any bytes arrive.
+                # A local SHA-256 alone cannot detect splicing two remote file versions.
+                partial = {"identity": identity, "total": total}
+                etag = response.headers.get("ETag")
+                if etag and not etag.startswith("W/"):
+                    partial["etag"] = etag
+                elif response.headers.get("Last-Modified"):
+                    partial["last_modified"] = response.headers["Last-Modified"]
+                write_private(part_record, json.dumps(partial).encode())
                 with open(part, "ab" if offset else "wb") as f:
                     while True:
                         if stop.is_set():
@@ -1686,6 +1763,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                         if on_progress:
                             on_progress(offset + received, offset + expected if expected else 0, len(chunk))
             except NETWORK_ERRORS as error:
+                check_transfer_error(error)
                 note = f"connection dropped ({error.__class__.__name__})"
                 continue
         if expected and received != expected:
@@ -1739,7 +1817,16 @@ class Transfer:
             return fetch_track(self.session, self.lib, self.out, rel, path, track_id, self.stop,
                                progress, self.quality, self.verify, self.adopt_existing,
                                self.locks, self.work, self.source)
+        except TerminalTransferError as error:
+            self.stop.set()
+            return "fail", 0, str(error)
         except Fail as error:
+            return ("stopped", 0, "") if self.stop.is_set() else ("fail", 0, str(error))
+        except OSError as error:
+            if local_file_error(error):
+                self.stop.set()
+                return "fail", 0, (f"Local file operation failed ({error.__class__.__name__}, errno {error.errno}). "
+                                   "Check the download folder before restarting.")
             return "fail", 0, str(error)
         except Exception as error:  # one bad file shouldn't stop the rest
             return "fail", 0, f"{error.__class__.__name__}: {error}"

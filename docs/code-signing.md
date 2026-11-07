@@ -1,8 +1,9 @@
 # macOS Developer ID signing and notarization
 
-This recipe is explicit build support. Existing 1.4.0 release assets are unchanged.
-A local Developer ID certificate alone does not establish notarization or give
-GitHub runners access to the certificate's private key.
+The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
+including attached tickets and verification of the extracted archives. Historical
+release assets remain unchanged. A local certificate alone does not establish
+notarization or give GitHub runners access to its private key.
 
 Configure the following GitHub Actions secrets in the **ibfetch** repository:
 
@@ -44,3 +45,25 @@ Windows signing is separate; MIT licensing does not imply an Apple signature.
 
 References: [Apple notarization](https://developer.apple.com/documentation/technotes/tn3147-migrating-to-the-latest-notarization-tool),
 [electron-builder signing](https://www.electron.build/v26/docs/features/code-signing/).
+
+## Complete release validation
+
+The signing report now records the final archive name and SHA-256 after native,
+extracted-app and Gatekeeper checks. Before creating a new release, stage all five
+archives and their SHA-256 companions. Copy the two matching signing artifacts to
+`proofs/macos-arm64.json` and `proofs/macos-x64.json` under that staging directory.
+Run `python tools/verify_release.py STAGING_DIRECTORY VERSION`.
+
+This validates the entire set and both archive-bound Apple reports before writing
+`SHA256SUMS`. It rejects missing, changed, ad-hoc or mismatched Mac downloads and
+conflicting existing release checksums. It does not publish or replace archives.
+Publish a new draft only after the source checks and all four native targets for
+the reviewed version pass; verify every uploaded digest before making it public.
+Never overwrite existing release downloads with an ordinary unsigned rebuild.
+
+On GitHub's hosted Mac runners, explicit signed jobs temporarily block
+outbound UDP port 443 so Apple's ticket lookup uses HTTPS over TCP. This follows
+[the runner maintainers' workaround](https://github.com/actions/runner-images/issues/14924)
+for dropped HTTP/3 connections, observed on both Mac architectures. It applies only to that disposable runner; local
+builds and installed apps do not change network settings. All signature, ticket,
+TLS and Gatekeeper checks remain mandatory.

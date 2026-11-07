@@ -72,23 +72,23 @@ JSON manifest records download identity and integrity; it never writes tags or a
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.5.0 | Open after extracting |
+| System | Download for 1.6.0 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.5.0/ibfetch-1.5.0-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
 Chromium desktop libraries. Windows ARM and Linux ARM desktop builds are not supplied;
 use Python/browser on those systems.
 
-**macOS:** move `ibfetch.app` to Applications and open it. The app has an ad-hoc
-signature and is not Apple-notarized. If the first launch is blocked, review the
-source/download, then use **System Settings > Privacy & Security > Open Anyway**
-for this app. Do not disable Gatekeeper globally. [Apple's instructions](https://support.apple.com/en-gb/102445).
+**macOS:** move `ibfetch.app` to Applications and open it. The 1.6.0 Mac downloads
+are Developer ID signed and notarized by Apple, with the notarization ticket attached.
+macOS may ask you to confirm opening an app downloaded from the internet.
+Earlier release downloads are unchanged. [Signing details](docs/code-signing.md).
 
 **Windows:** right-click the ZIP, choose **Extract All**, then open `ibfetch.exe`
 from the extracted folder. These builds are not Authenticode signed; Windows may
@@ -98,7 +98,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.5.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.6.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -457,3 +457,9 @@ MediaSync Lite uses the same download service for the whole library at once, in 
 
 ibfetch is [MIT licensed](LICENSE). Desktop downloads include third-party license
 notices in their resources folder; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+
+For resumed streaming downloads, ibfetch checks the original total size and any
+saved ETag/Last-Modified validator before appending. Older `.part` files without
+that original size are preserved with an explanation; use another output folder
+to restart that track. Completed downloads remain recognized. A local disk or
+permission error stops the batch; fix the folder/disk and retry.

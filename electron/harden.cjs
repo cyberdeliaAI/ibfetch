@@ -1,8 +1,8 @@
 "use strict";
 const path = require("node:path");
-const {flipFuses, FuseVersion, FuseV1Options} = require("@electron/fuses");
 
 module.exports = async context => {
+  const {flipFuses, FuseVersion, FuseV1Options} = await import("@electron/fuses");
   const name = context.packager.appInfo.productFilename;
   const executable = context.electronPlatformName === "darwin"
     ? path.join(context.appOutDir, name + ".app")

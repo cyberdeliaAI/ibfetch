@@ -1,10 +1,11 @@
 "use strict";
 
-const {app, BrowserWindow, Menu, dialog, shell, session} = require("electron");
+const {app, BrowserWindow, Menu, dialog, shell, session, screen} = require("electron");
 const path = require("node:path");
 const {Backend, backendCommand} = require("./backend.cjs");
 const {applicationUrl, externalUrl} = require("./security.cjs");
 const info = require("./package.json");
+const {windowSize, rememberWindowSize} = require("./window-size.cjs");
 const {installSignIn} = require("./sign-in.cjs");
 
 app.setName("ibfetch");
@@ -29,13 +30,16 @@ function createWindow(url) {
     try { allowed = new URL(details.url).origin === origin; } catch { /* deny */ }
     callback({cancel: !allowed});
   });
-  window = new BrowserWindow({title: "ibfetch", width: 1320, height: 850, minWidth: 420,
-    minHeight: 600, show: false, backgroundColor: "#121915", webPreferences: {
+  const sizeFile = path.join(app.getPath("userData"), "main-window.json");
+  const size = windowSize(sizeFile, {width: 1320, height: 850, minWidth: 420, minHeight: 600},
+                          screen.getPrimaryDisplay().workArea);
+  window = new BrowserWindow({title: "ibfetch", ...size, show: false, backgroundColor: "#121915", webPreferences: {
       preload: path.join(__dirname, "sign-in-preload.cjs"),
       partition: "persist:ibfetch", nodeIntegration: false, contextIsolation: true,
       sandbox: true, webSecurity: true, webviewTag: false, devTools: !app.isPackaged,
       allowRunningInsecureContent: false,
     }});
+  rememberWindowSize(window, sizeFile);
   signIn = installSignIn(window, url);
   const contents = window.webContents;
   contents.setWindowOpenHandler(({url: value}) => { openExternal(value); return {action: "deny"}; });

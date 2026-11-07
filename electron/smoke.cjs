@@ -13,7 +13,7 @@ async function check({app, window, backend}) {
     const branding = await window.webContents.executeJavaScript("(() => { const imgs = [...document.querySelectorAll('.powered img, .brand img')]; return imgs.length === 3 && imgs.every(img => img.complete && img.naturalWidth > 0); })()");
     if (!html.includes("Sign in to iBroadcast") || !branding || preferences.nodeIntegration || !preferences.sandbox || !preferences.contextIsolation || appearance.palette !== "ocean" || appearance.theme !== "dark") throw new Error("Smoke check failed");
     fs.writeFileSync(process.env.IBFETCH_SMOKE_REPORT, JSON.stringify({ok: true, version: app.getVersion(),
-      isolated: true, palette: appearance.palette, theme: appearance.theme, backendPid: backend.child.pid}));
+      isolated: true, electron: process.versions.electron, palette: appearance.palette, theme: appearance.theme, backendPid: backend.child.pid}));
     window.destroy();
     app.quit();
   } catch {

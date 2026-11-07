@@ -1,6 +1,8 @@
 "use strict";
 
 const http = require("node:http");
+const path = require("node:path");
+const {windowSize, rememberWindowSize} = require("./window-size.cjs");
 const {isIP} = require("node:net");
 const {applicationUrl} = require("./security.cjs");
 const SIGN_IN_PARTITION = "persist:ibfetch-sign-in";
@@ -53,7 +55,7 @@ function signInApi(address, pathname, body) {
 }
 
 function installSignIn(owner, address, dependencies = require("electron"), request = signInApi) {
-  const {BrowserWindow, ipcMain, session} = dependencies, contents = owner.webContents;
+  const {BrowserWindow, ipcMain, session, screen} = dependencies, contents = owner.webContents;
   const origin = new URL(address).origin;
   let current = null, serial = 0;
   const fromOwner = event => !contents.isDestroyed() && event.sender === contents
@@ -72,7 +74,7 @@ function installSignIn(owner, address, dependencies = require("electron"), reque
   function end(entry, {cancel = false, reason = "closed", announce = false, restore = false} = {}) {
     if (!entry || current !== entry) return;
     current = null; serial += 1;
-    if (entry.view && !entry.view.isDestroyed()) { entry.view.destroy(); }
+    if (entry.view && !entry.view.isDestroyed()) { entry.saveSize?.(); entry.view.destroy(); }
     if (cancel) {
       // Bound cancellation cannot revoke an accepted login or cancel a newer flow.
       request(address, "/api/login/cancel", {request_id: entry.id}).catch(() => {}).finally(() => {
@@ -98,12 +100,15 @@ function installSignIn(owner, address, dependencies = require("electron"), reque
           || !Number.isFinite(device.expires_at) || device.expires_at * 1000 <= Date.now()) {
         end(entry); return false;
       }
-      const view = entry.view = new BrowserWindow({parent: owner, width: 620, height: 800,
-        minWidth: 360, minHeight: 480, show: false,
+      const area = screen.getDisplayMatching(owner.getBounds()).workArea;
+      const sizeFile = dependencies.app ? path.join(dependencies.app.getPath("userData"), "sign-in-window.json") : null;
+      const size = windowSize(sizeFile, {width: 620, height: 800, minWidth: 360, minHeight: 480}, area);
+      const view = entry.view = new BrowserWindow({parent: owner, ...size, show: false,
         title: "Sign in to iBroadcast", backgroundColor: "#ffffff", autoHideMenuBar: true,
         webPreferences: {partition: SIGN_IN_PARTITION, sandbox: true, contextIsolation: true,
           nodeIntegration: false, webSecurity: true, webviewTag: false,
           allowRunningInsecureContent: false, devTools: false, safeDialogs: true}});
+      entry.saveSize = rememberWindowSize(view, sizeFile);
       view.setMenu(null);
       view.once("ready-to-show", () => { if (current === entry) { view.show(); view.focus(); } });
       const remote = view.webContents;

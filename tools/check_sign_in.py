@@ -76,21 +76,26 @@ def main():
                        IBFETCH_SIGN_IN_SMOKE_REPORT=str(args.report), IBROADCAST_CLIENT_ID="synthetic-client")
             command = ([str(args.app.resolve())] if args.app else
                        [str(ROOT / "electron/node_modules/.bin/electron"), str(ROOT / "electron")])
-            args.report.unlink(missing_ok=True)
-            process = subprocess.Popen(command, env=env, cwd=home,
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try:
-                code = process.wait(timeout=110)
-            except subprocess.TimeoutExpired:
-                process.terminate()
-                process.wait(timeout=15)
-                raise RuntimeError("The isolated sign-in check timed out") from None
-            result = json.loads(args.report.read_text()) if args.report.exists() else {"ok": False}
-            if code or not result.get("ok"):
-                raise RuntimeError("Sign-in check failed: " + json.dumps(result))
-            if not (home / "tokens.json").exists():
-                raise RuntimeError("Synthetic sign-in was not persisted")
-            print("Verified isolated sign-in, cancellation, denial, browser fallback and approval.")
+            phases = []
+            for phase in ("initial", "restart"):
+                env["IBFETCH_SIGN_IN_PHASE"] = phase
+                args.report.unlink(missing_ok=True)
+                process = subprocess.Popen(command, env=env, cwd=home,
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    code = process.wait(timeout=110)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    process.wait(timeout=15)
+                    raise RuntimeError("The isolated sign-in check timed out") from None
+                result = json.loads(args.report.read_text()) if args.report.exists() else {"ok": False}
+                if code or not result.get("ok"):
+                    raise RuntimeError("Sign-in check failed: " + json.dumps(result))
+                if phase == "initial" and not (home / "tokens.json").exists():
+                    raise RuntimeError("Synthetic sign-in was not persisted")
+                phases.append(result)
+            args.report.write_text(json.dumps({"ok": True, "phases": phases}, indent=2) + "\n")
+            print("Verified isolated sign-in, approval, cancellation, fallback and size restoration after restart.")
     finally:
         provider.shutdown()
         provider.server_close()
