@@ -202,7 +202,16 @@ def write_private(path, data):
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        os.replace(tmp, path)
+        for attempt in range(6):
+            try:
+                os.replace(tmp, path)
+                break
+            except OSError as error:
+                # Windows scanners/readers can briefly deny an atomic rename even
+                # while our own writers are serialized. Never delete the baseline.
+                if getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 5:
+                    raise
+                time.sleep(0.05 * (2 ** attempt))
     finally:
         try:
             tmp.unlink()

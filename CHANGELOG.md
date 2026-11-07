@@ -6,6 +6,7 @@
 - Remember main/sign-in window sizes, clamp them to the current screen and retain normal dimensions across fullscreen.
 - Validate original size and available remote validators before resuming streamed audio; preserve unsafe older partials.
 - Stop a batch on local disk/permission failures, rejected sessions or TLS validation failures; keep socket errors retryable and preserve cancellation status.
+- Retry briefly when Windows temporarily blocks an atomic settings/manifest replacement, preserving the previous file on failure.
 - Report temporary token-renewal outages accurately while preserving the saved sign-in for a later retry.
 - Verify actual packaged Electron versions and startup fuses, including the extracted archives.
 - Bind Mac signing/notarization reports to each final archive checksum and require a complete verified release set.
