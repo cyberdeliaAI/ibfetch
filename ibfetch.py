@@ -84,6 +84,10 @@ class Fail(Exception):
     """A problem to report to the user without a traceback."""
 
 
+class TerminalTransferError(Fail):
+    """Stop the batch until its authentication or secure connection is restored."""
+
+
 # -- small helpers ------------------------------------------------------------
 
 def text(value):
@@ -270,6 +274,13 @@ def connection_error(error, service="iBroadcast"):
     return f"Could not reach {service} ({error.__class__.__name__})."
 
 
+def check_transfer_error(error):
+    if isinstance(getattr(error, "reason", error), ssl.SSLCertVerificationError):
+        raise TerminalTransferError(connection_error(error)) from None
+    if local_file_error(error):
+        raise error
+
+
 RELEASES_URL = "https://github.com/cyberdeliaAI/ibfetch/releases"
 UPDATE_API = "https://api.github.com/repos/cyberdeliaAI/ibfetch/releases/latest"
 UPDATE_INTERVAL = 24 * 60 * 60
@@ -426,6 +437,7 @@ def oauth_post(path, form):
                         {"Content-Type": "application/x-www-form-urlencoded"}, 45)
         return status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
+        check_transfer_error(error)
         raise Fail(connection_error(error, "iBroadcast sign-in")) from None
 
 
@@ -445,6 +457,7 @@ def device_start(client_id):
         response = http("GET", f"{OAUTH_URL}/device/code?{query}", timeout=45)
         code, data = status_of(response), as_json(read_body(response))
     except NETWORK_ERRORS as error:
+        check_transfer_error(error)
         raise Fail(connection_error(error, "iBroadcast sign-in")) from None
     if code >= 400 or not data.get("device_code"):
         raise Fail(f"iBroadcast refused the sign-in request (HTTP {code}). Check the client ID.")
@@ -516,12 +529,12 @@ class Session:
     def _refresh_locked(self):
         refresh_token = self.tokens.get("refresh_token")
         if not refresh_token or not self.tokens.get("client_id"):
-            raise Fail("Your iBroadcast session expired. Run: ibfetch login")
+            raise TerminalTransferError("Your iBroadcast session expired. Run: ibfetch login")
         code, data = oauth_post("token", {"grant_type": "refresh_token",
                                           "client_id": self.tokens["client_id"],
                                           "refresh_token": refresh_token})
         if code >= 400 and data.get("error") in ("invalid_grant", "invalid_token"):
-            raise Fail("Your iBroadcast session expired. Run: ibfetch login")
+            raise TerminalTransferError("Your iBroadcast session expired. Run: ibfetch login")
         if code >= 400 or not isinstance(data.get("access_token"), str) or not data["access_token"]:
             raise Fail("iBroadcast sign-in renewal is temporarily unavailable. "
                        "Try again later; your sign-in is retained.")
@@ -555,8 +568,11 @@ class Session:
             headers = {"Range": f"bytes={offset}-"} if offset else {}
             response = http("GET", f"{STREAM_URL}{path}?{urllib.parse.urlencode(params)}",
                             headers=headers, timeout=120)
-            if status_of(response) not in (401, 403) or attempt == 2:
+            if status_of(response) not in (401, 403):
                 return response
+            if attempt == 2:
+                response.close()
+                raise TerminalTransferError("iBroadcast rejected the session. Sign in again before restarting downloads.")
             response.close()
             token = self.refresh(token)
 
@@ -581,6 +597,8 @@ class Session:
             if refused and attempt == 1:
                 token = self.refresh(token)
                 continue
+            if refused:
+                raise TerminalTransferError("iBroadcast rejected the session. Sign in again before restarting downloads.")
             message = text(answer.get("message")).strip()[:200] or f"HTTP {code}"
             raise ServiceError(f"iBroadcast's download service refused it ({message})",
                                retry=code == 429 or code >= 500)
@@ -1611,8 +1629,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                 break
             except NETWORK_ERRORS as error:
                 # Preserve filesystem failures; socket errors remain retryable.
-                if local_file_error(error):
-                    raise
+                check_transfer_error(error)
                 note = f"network error ({error.__class__.__name__})"
                 continue
             digest = hashlib.sha256()
@@ -1628,8 +1645,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                 break
             except NETWORK_ERRORS as error:
                 # Preserve filesystem failures; socket errors remain retryable.
-                if local_file_error(error):
-                    raise
+                check_transfer_error(error)
                 note = f"connection dropped ({error.__class__.__name__})"
                 continue
             if length is None:
@@ -1668,8 +1684,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
         try:
             response = session.stream(path, track_id, lib.user_id, lib.expires, offset)
         except NETWORK_ERRORS as error:
-            if local_file_error(error):
-                raise
+            check_transfer_error(error)
             note = f"network error ({error.__class__.__name__})"
             continue
         with response:
@@ -1739,8 +1754,7 @@ def _fetch_track(session, lib, out, rel, path, track_id, stop, on_progress, qual
                         if on_progress:
                             on_progress(offset + received, offset + expected if expected else 0, len(chunk))
             except NETWORK_ERRORS as error:
-                if local_file_error(error):
-                    raise
+                check_transfer_error(error)
                 note = f"connection dropped ({error.__class__.__name__})"
                 continue
         if expected and received != expected:
@@ -1794,6 +1808,9 @@ class Transfer:
             return fetch_track(self.session, self.lib, self.out, rel, path, track_id, self.stop,
                                progress, self.quality, self.verify, self.adopt_existing,
                                self.locks, self.work, self.source)
+        except TerminalTransferError as error:
+            self.stop.set()
+            return "fail", 0, str(error)
         except Fail as error:
             return ("stopped", 0, "") if self.stop.is_set() else ("fail", 0, str(error))
         except OSError as error:

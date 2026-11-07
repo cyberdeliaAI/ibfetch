@@ -349,6 +349,25 @@ class DownloadTests(unittest.TestCase):
         self.assertTrue(transfer.stop.is_set())
         self.assertNotIn("synthetic private path", result[2])
 
+    def test_certificate_failure_stops_without_fallback_or_repeated_requests(self):
+        import ssl
+        import urllib.error
+        self.session.stream.side_effect = urllib.error.URLError(ssl.SSLCertVerificationError(1, "private request"))
+        with self.assertRaises(app.TerminalTransferError) as caught:
+            self.fetch()
+        self.assertNotIn("private request", str(caught.exception))
+        self.assertEqual(self.session.stream.call_count, 1)
+        transfer = app.Transfer(self.session, self.lib, [], self.out, 1)
+        with patch.object(app, "fetch_track", side_effect=app.TerminalTransferError("Session rejected")):
+            self.assertEqual(transfer._work(Path("song.flac"), "/orig/one", 1)[0], "fail")
+        self.assertTrue(transfer.stop.is_set())
+
+    def test_cancelled_work_is_stopped_rather_than_a_failed_track(self):
+        transfer = app.Transfer(self.session, self.lib, [], self.out, 1)
+        transfer.stop.set()
+        with patch.object(app, "fetch_track", side_effect=app.Fail("Cancelled")):
+            self.assertEqual(transfer._work(Path("song.flac"), "/orig/one", 1), ("stopped", 0, ""))
+
     def test_missing_range_does_not_append(self):
         self.interrupt()
         self.assertEqual(self.fetch(self.response(b"bad", 206))[0], "fail")
