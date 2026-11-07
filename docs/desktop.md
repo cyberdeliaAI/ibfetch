@@ -159,3 +159,22 @@ sessions are unchanged. The terminal continues to print its approval link/code.
 Developer ID build preparation and required secrets are documented in
 [code-signing.md](code-signing.md). Signed status must describe the actual release
 assets; adding this recipe does not change existing unsigned downloads.
+
+## Maintenance checks
+
+Desktop builds pin Electron 44.10.2 and electron-builder 26.18.0. The build checks
+both the actual running Electron version and the packaged startup fuses, then
+repeats native checks against the extracted archive. The browser/terminal version
+still uses only Python's standard library.
+
+Affected minimatch 7–10 build dependencies are explicitly resolved to 11.0.1 for
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+Legacy minimatch 3/5 dependencies retain their own API. Keep the version-specific
+override until upstream packaging dependencies include the patched versions.
+
+Known documentation-only changes run local file/image checks. Changes to code,
+workflows, icons, bundled license notices or dependencies require full application
+checks. Explicit desktop/signing builds always run the complete checks.
+
+Main and sign-in windows remember their normal size independently, constrained by
+the current display. These local preferences do not contain account information.

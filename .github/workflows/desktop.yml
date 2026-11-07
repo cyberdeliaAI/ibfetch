@@ -14,7 +14,12 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   desktop:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     name: Desktop ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60

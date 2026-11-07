@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0
+
+- Update Electron to 44.10.2 and electron-builder to 26.18.0; patch affected minimatch build dependencies.
+- Remember main/sign-in window sizes, clamp them to the current screen and retain normal dimensions across fullscreen.
+- Report temporary token-renewal outages accurately while preserving the saved sign-in for a later retry.
+- Verify actual packaged Electron versions and startup fuses, including the extracted archives.
+- Bind Mac signing/notarization reports to each final archive checksum and require a complete verified release set.
+- Use lightweight checks for known documentation-only changes; code, build inputs and explicit builds retain full verification.
+
 ## 1.5.0
 
 - Open iBroadcast sign-in in an isolated desktop window, close it after approval and return to ibfetch.

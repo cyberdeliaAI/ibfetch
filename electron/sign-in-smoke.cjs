@@ -1,7 +1,7 @@
 "use strict";
 // Only used by the explicit local-provider test runner, never during a normal sign-in.
-const assert=require("node:assert/strict"), fs=require("node:fs");
-const {session}=require("electron"), {SIGN_IN_PARTITION}=require("./sign-in.cjs");
+const assert=require("node:assert/strict"), fs=require("node:fs"), path=require("node:path");
+const {session,screen}=require("electron"), {SIGN_IN_PARTITION}=require("./sign-in.cjs");
 async function check({app,window,signIn}) {
   const base=process.env.IBFETCH_BASE, report=process.env.IBFETCH_SIGN_IN_SMOKE_REPORT;
   if(!process.env.IBFETCH_HOME || !process.env.IBFETCH_ELECTRON_PROFILE || !base || new URL(base).hostname!=="127.0.0.1")
@@ -19,6 +19,12 @@ async function check({app,window,signIn}) {
       return new Response('<!doctype html><meta charset="utf-8"><title>Controlled iBroadcast sign-in</title><h1>iBroadcast sign-in test</h1><p>No real account is used.</p>',
         {headers:{"Content-Type":"text/html","Content-Security-Policy":"default-src 'none'"}});
     });intercepted=true;
+    const restart=process.env.IBFETCH_SIGN_IN_PHASE==="restart";
+    if(restart) {
+      const area=screen.getPrimaryDisplay().workArea, bounds=window.getBounds();
+      assert.equal(bounds.width,Math.min(1100,area.width));assert.equal(bounds.height,Math.min(760,area.height));
+      await run('(async()=>{await api("/api/logout",{});await poll();})()');
+    }
     stage="open";await run("beginSignIn()");await until(()=>Boolean(signIn.window));
     let view=signIn.window;await until(()=>!view.webContents.isLoading());
     const prefs=view.webContents.getLastWebPreferences();
@@ -26,6 +32,14 @@ async function check({app,window,signIn}) {
     assert.equal(prefs.sandbox,true);assert.equal(prefs.contextIsolation,true);
     assert.equal(await view.webContents.executeJavaScript('typeof window.ibfetchSignIn'),"undefined");
     assert.equal(new URL(view.webContents.getURL()).origin,"https://oauth.ibroadcast.com");
+    if(restart) {
+      const area=screen.getDisplayMatching(window.getBounds()).workArea;
+      assert.equal(view.getBounds().width,Math.min(502,area.width));
+      assert.equal(view.getBounds().height,Math.min(650,area.height));
+      view.close();await until(()=>run("!S.login && !signInFlow.requestId"));
+      done({ok:true,phase:"restart",mainSizeRestored:true,signInSizeRestored:true});return;
+    }
+    view.setSize(502,650);
     stage="close";view.close();await until(()=>run("!S.login && !signInFlow.requestId"));
     stage="deny";await run("beginSignIn()");await until(()=>Boolean(signIn.window));
     await fetch(base+"/_signin/outcome",{method:"POST",body:JSON.stringify("deny")});
@@ -47,7 +61,8 @@ async function check({app,window,signIn}) {
       const result=await run('({width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth})');
       assert.equal(result.overflow,false);layouts.push(result);
     }
-    done({ok:true,providerWindow:true,noRemoteBridge:true,sandbox:true,cancelled:true,deniedAndRetried:true,
+    window.setSize(1100,760);await sleep(350);
+    done({ok:true,phase:"initial",windowSizesSaved:true,providerWindow:true,noRemoteBridge:true,sandbox:true,cancelled:true,deniedAndRetried:true,
       browserFallback:true,approvedAndReturned:true,layouts});
   } catch(error) {done({ok:false,stage,error:error.message});}
   finally {if(intercepted)session.fromPartition(SIGN_IN_PARTITION).protocol.unhandle("https");}

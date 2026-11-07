@@ -44,3 +44,18 @@ Windows signing is separate; MIT licensing does not imply an Apple signature.
 
 References: [Apple notarization](https://developer.apple.com/documentation/technotes/tn3147-migrating-to-the-latest-notarization-tool),
 [electron-builder signing](https://www.electron.build/v26/docs/features/code-signing/).
+
+## Complete release validation
+
+The signing report now records the final archive name and SHA-256 after native,
+extracted-app and Gatekeeper checks. Before creating a new release, stage all five
+archives and their SHA-256 companions. Copy the two matching signing artifacts to
+`proofs/macos-arm64.json` and `proofs/macos-x64.json` under that staging directory.
+Run `python tools/verify_release.py STAGING_DIRECTORY VERSION`.
+
+This validates the entire set and both archive-bound Apple reports before writing
+`SHA256SUMS`. It rejects missing, changed, ad-hoc or mismatched Mac downloads and
+conflicting existing release checksums. It does not publish or replace archives.
+Publish a new draft only after the source checks and all four native targets for
+the reviewed version pass; verify every uploaded digest before making it public.
+Never overwrite existing release downloads with an ordinary unsigned rebuild.

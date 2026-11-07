@@ -8,7 +8,12 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   python:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     name: Python ${{ matrix.python }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -29,6 +34,8 @@ jobs:
       - run: python -B ibfetch.py --version
 
   frontend:
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

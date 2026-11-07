@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -508,8 +508,11 @@ class Session:
         code, data = oauth_post("token", {"grant_type": "refresh_token",
                                           "client_id": self.tokens["client_id"],
                                           "refresh_token": refresh_token})
-        if code >= 400 or not data.get("access_token"):
+        if code >= 400 and data.get("error") in ("invalid_grant", "invalid_token"):
             raise Fail("Your iBroadcast session expired. Run: ibfetch login")
+        if code >= 400 or not isinstance(data.get("access_token"), str) or not data["access_token"]:
+            raise Fail("iBroadcast sign-in renewal is temporarily unavailable. "
+                       "Try again later; your sign-in is retained.")
         self.tokens = token_record(data, self.tokens["client_id"], refresh_token)
         write_private(self.path, json.dumps(self.tokens, indent=2).encode())
 

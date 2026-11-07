@@ -73,6 +73,16 @@ def verify_macos_app(directory, team_id=None):
     }, indent=2) + "\n", encoding="utf-8")
 
 
+def verify_fuses(executable):
+    bundle = executable.parent.parent.parent if sys.platform == "darwin" else executable
+    result = subprocess.run([shutil.which("node"), str(ROOT / "electron/verify-fuses.cjs"), str(bundle)],
+                            check=True, capture_output=True, text=True, env=build_environments(False)[0])
+    proof = json.loads(result.stdout)
+    reports = ROOT / "build/reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "electron-fuses.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+
+
 def check_app(executable, version):
     resources = (executable.parent.parent / "Resources" if sys.platform == "darwin"
                  else executable.parent / "resources")
@@ -94,7 +104,9 @@ def check_app(executable, version):
                    IBFETCH_ELECTRON_PROFILE=str(home / "profile"), IBFETCH_SMOKE_REPORT=str(report))
         subprocess.run([str(executable)], env=env, check=True, timeout=90)
         result = json.loads(report.read_text("utf-8"))
+        expected_electron = json.loads((ROOT / "electron/package.json").read_text())["devDependencies"]["electron"]
         if (not result.get("ok") or result.get("version") != version or not result.get("isolated")
+                or result.get("electron") != expected_electron
                 or result.get("palette") != "ocean" or result.get("theme") != "dark"):
             raise RuntimeError("Desktop smoke check failed")
         print("Standalone window and isolated renderer verified.")
@@ -158,6 +170,7 @@ def main():
         executable = directory / ("ibfetch.exe" if os.name == "nt" else "ibfetch")
     if sys.platform == "darwin":
         verify_macos_app(directory, pack_env["APPLE_TEAM_ID"] if args.sign_macos else None)
+    verify_fuses(executable)
     check_app(executable, version)
     packages = ROOT / "dist"
     packages.mkdir(exist_ok=True)
@@ -186,11 +199,16 @@ def main():
         else:
             shutil.unpack_archive(str(archive), str(destination), filter="data")
             extracted = destination / "ibfetch/ibfetch"
+        verify_fuses(extracted)
         check_app(extracted, version)
         subprocess.run([sys.executable, str(ROOT / "tools/check_sign_in.py"), "--app", str(extracted),
                         "--report", str(ROOT / "build/reports/sign-in.json")], check=True,
-                       env=plain_env, timeout=130)
+                       env=plain_env, timeout=250)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if args.sign_macos:
+        report = ROOT / "build/reports/macos-signing.json"
+        report.write_text(json.dumps({**json.loads(report.read_text()), "archive": archive.name,
+                                      "sha256": digest}, indent=2) + "\n", encoding="utf-8")
     archive.with_name(archive.name + ".sha256").write_text(f"{digest}  {archive.name}\n", encoding="ascii")
     print(f"Verified standalone archive: {archive}")
 
