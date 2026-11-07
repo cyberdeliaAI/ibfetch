@@ -62,6 +62,13 @@ jobs:
       - name: Build and test extracted standalone archive
         if: runner.os != 'Linux' && !(runner.os == 'macOS' && inputs.sign_macos == true)
         run: python tools/build_desktop.py --skip-install
+      - name: Keep Apple ticket lookup on HTTPS/TCP on the hosted Intel runner
+        if: matrix.target == 'macos-x64' && github.event_name == 'workflow_dispatch' && inputs.sign_macos == true
+        # Temporary runner-only workaround recommended by actions/runner-images#14924.
+        # Blocking HTTP/3 forces stapler onto HTTPS/TCP; signature/TLS checks stay enabled.
+        run: |
+          echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f -
+          sudo pfctl -E
       - name: Build signed and notarized macOS app and verify extracted archive
         if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.sign_macos == true
         env:
