@@ -59,7 +59,7 @@ Native macOS code-signature verification remains enabled.
 The release staging command is:
 
 ```sh
-python tools/verify_release.py RELEASE_DIRECTORY 1.7.0 --prepare-update-feed
+python tools/verify_release.py RELEASE_DIRECTORY 1.7.1 --prepare-update-feed
 ```
 
 Place the archive-bound Apple reports under `RELEASE_DIRECTORY/proofs/` as
