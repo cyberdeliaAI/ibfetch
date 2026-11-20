@@ -37,8 +37,8 @@ before installing. Saved sign-in, settings and music are retained.
 Homebrew installations use `brew upgrade --cask cyberdeliaAI/apps/ibfetch` (or
 `--formula` for Python). The portable Windows/Linux and Python/browser versions
 show the release notes and download link; replace their files manually after
-closing the old copy. To move from 1.6.0 to this first updater-enabled Mac version,
-install the new release manually once. See [desktop updates](docs/desktop-updates.md)
+closing the old copy. To move from 1.6.0 to an updater-enabled Mac version,
+install a new release manually once. See [desktop updates](docs/desktop-updates.md)
 for platform support and verification limits.
 
 ## File metadata
@@ -85,20 +85,20 @@ JSON manifest records download identity and integrity; it never writes tags or a
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.7.0 | Open after extracting |
+| System | Download for 1.7.1 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.1/ibfetch-1.7.1-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.1/ibfetch-1.7.1-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.1/ibfetch-1.7.1-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.1/ibfetch-1.7.1-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.1/ibfetch-1.7.1-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
 Chromium desktop libraries. Windows ARM and Linux ARM desktop builds are not supplied;
 use Python/browser on those systems.
 
-**macOS:** move `ibfetch.app` to Applications and open it. The 1.7.0 Mac downloads
+**macOS:** move `ibfetch.app` to Applications and open it. The 1.7.1 Mac downloads
 are Developer ID signed and notarized by Apple, with the notarization ticket attached.
 macOS may ask you to confirm opening an app downloaded from the internet.
 Earlier release downloads are unchanged. [Signing details](docs/code-signing.md).
@@ -111,7 +111,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.7.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.7.1-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
