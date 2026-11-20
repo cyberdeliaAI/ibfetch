@@ -24,7 +24,7 @@ owned backend. Saved music and sign-in settings survive an upgrade/uninstall.
 
 ### macOS
 
-The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
+The official 1.7.0 Mac downloads are Developer ID signed and notarized by Apple,
 with the ticket attached. Move `ibfetch.app` to Applications and open it. Confirm
 macOS's normal first-launch prompt for a downloaded app if shown. Keep the overall
 system security settings enabled. Historical downloads retain their original
@@ -48,7 +48,7 @@ computer may prohibit unsigned apps. Do not disable system-wide protections.
 Extract and run from a graphical desktop:
 
 ```sh
-tar -xzf ibfetch-1.6.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.7.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -63,20 +63,20 @@ Each release archive has a .sha256 companion. Keep both in the same folder.
 macOS:
 
 ```sh
-shasum -a 256 -c ibfetch-1.6.0-macos-arm64.zip.sha256
+shasum -a 256 -c ibfetch-1.7.0-macos-arm64.zip.sha256
 ```
 
 Linux:
 
 ```sh
-sha256sum -c ibfetch-1.6.0-linux-x64.tar.gz.sha256
+sha256sum -c ibfetch-1.7.0-linux-x64.tar.gz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\ibfetch-1.6.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\ibfetch-1.6.0-windows-x64.zip.sha256
+Get-FileHash .\ibfetch-1.7.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\ibfetch-1.7.0-windows-x64.zip.sha256
 ```
 
 Compare the 64-character digest exactly. A checksum checks download integrity;
