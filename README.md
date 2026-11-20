@@ -181,8 +181,8 @@ ibfetch
 Without a command, ibfetch opens its app in your browser. It runs on your own computer only: the page lives at `127.0.0.1` and only the link printed in your terminal opens it. Keep the terminal window open while you use it.
 
 1. Sign in with iBroadcast. The page shows a code and a button to iBroadcast's approval page.
-2. Pick an artist on the left, a letter for every artist on that letter, or search with the fields. `*` matches anything.
-3. Tick albums and add them to the download list, or add all results at once. The arrow before an album shows its tracks. Shift-click selects a range.
+2. Pick an artist on the left, or a letter followed by **Every artist on…** to search the whole group. **#** groups names starting with numbers, punctuation or non-Latin letters. You can also search with the fields; `*` matches anything.
+3. Click **Album** or another column heading to sort the results; click again to reverse the order. Tick albums and add them to the download list, or add all results at once. Sorting keeps the selected albums. The arrow before an album shows its tracks. Shift-click selects a range.
 4. Choose a folder, a quality and how many files at the same time, then press Download.
    For original files, **Original files from** chooses the download service or streaming.
 
@@ -248,6 +248,11 @@ popup. If a popup is blocked or the provider requires your normal browser, choos
 that sign-in attempt; an already approved connection is preserved. iBroadcast's
 remembered website sign-in stays in a separate desktop profile, so the first login
 may still ask for your account details. Passwords stay on iBroadcast.
+
+Explicit **Sign out** clears the desktop sign-in window's own remembered website
+session as well as ibfetch's library/session state. It does not sign you out of
+other browsers or Tagcast. In the browser version, use **Switch User** on the
+iBroadcast approval page if the browser remembers another account.
 
 ```bash
 ibfetch login
@@ -336,6 +341,18 @@ Change it with `--layout`. Fields: `{albumartist}`, `{album}`, `{year}`, `{disc}
 ```bash
 ibfetch get --artist "A*" --layout "{genre}/{albumartist} - {album}/{track} {title}"
 ```
+
+For compilations grouped by album instead of album artist, enter this in the app's
+**Folder and file names** field, or pass it with `--layout`:
+
+```
+{album} ({year})/{disctrack} {artist} - {title}
+```
+
+This gives each album its own folder with the track artist in each filename.
+The **Album** column controls display order; the layout controls folders on disk.
+Albums with identical titles/years can share a folder under this layout, so include
+`{albumartist}` when you want to keep those editions separate.
 
 Characters that aren't allowed in file names on Windows or macOS become `_`, so the same folder works everywhere.
 

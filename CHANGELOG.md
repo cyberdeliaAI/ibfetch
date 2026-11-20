@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0
+
+- Clear account-specific results, selections and filters immediately on sign-out or account change; reject library loads without an account ID.
+- Reset only the desktop provider window's own stored sign-in after confirmed sign-out, with isolation and pending-login guards.
+- Add whole-group selection for # artists, including names beyond the sidebar display limit.
+- Sort album results by any column in either direction while retaining selected albums and the download list.
+- Document an album-first layout for compilation downloads and the browser's Switch User option.
+
 ## 1.6.0
 
 - Ship Developer ID signed and Apple-notarized Mac downloads for Apple Silicon and Intel.

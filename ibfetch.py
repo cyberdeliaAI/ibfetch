@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -720,7 +720,9 @@ def load_library(session, home, refresh=False, quiet=False):
     status, _ = session.api("status")
     user = status.get("user") if isinstance(status.get("user"), dict) else {}
     state = status.get("status") if isinstance(status.get("status"), dict) else {}
-    user_id = text(user.get("id") or user.get("user_id"))
+    user_id = text(user.get("id") or user.get("user_id")).strip()
+    if not user_id:
+        raise Fail("iBroadcast did not return an account ID. Sign in again before loading a library.")
     premium = user.get("premium") in (True, 1, "1")
     lastmodified = text(state.get("lastmodified"))
     cache, meta_path = home / "library-cache.json.gz", home / "library-cache.meta.json"
@@ -762,9 +764,20 @@ def named_ids(table, pats, what):
     return ids
 
 
+def artist_initial(name, skip_the=False):
+    """Match the sidebar's A-Z/# groups, including accents and optional 'The'."""
+    value = unicodedata.normalize("NFKD", text(name))
+    value = " ".join("".join(c for c in value if not "\u0300" <= c <= "\u036f").lower().split())
+    if skip_the and value.startswith("the "):
+        value = value[4:]
+    initial = value[:1].upper()
+    return initial if len(initial) == 1 and "A" <= initial <= "Z" else "#"
+
+
 def select(lib, args):
     """Track IDs that pass every filter, grouped by album and sorted for display."""
     artists, track_artists = patterns(args.artist), patterns(args.track_artist)
+    initial = getattr(args, "artist_initial", None)
     albums, genres, formats = patterns(args.album), patterns(args.genre), patterns(args.format)
     years = [year_range(y) for y in args.year or []]
     album_ids = {number(i) for i in args.album_id or []}
@@ -778,7 +791,7 @@ def select(lib, args):
                 wanted.update(number(t) for t in table.get(i, "tracks") or [])
             only = wanted if only is None else only & wanted
 
-    any_filter = any((artists, track_artists, albums, genres, formats, years, album_ids, track_ids,
+    any_filter = any((artists, initial, track_artists, albums, genres, formats, years, album_ids, track_ids,
                       only is not None))
     if not any_filter and not args.all:
         raise Fail("Add at least one filter, like --artist \"4hero\", or use --all for everything.")
@@ -792,9 +805,11 @@ def select(lib, args):
         album_id = number(lib.tracks.get(track_id, "album_id"))
         if album_ids and album_id not in album_ids:
             continue
-        if artists:
+        if artists or initial:
             if album_id not in artist_ok:
-                artist_ok[album_id] = any_match(artists, lib.album_artist(album_id), args.skip_the)
+                name = lib.album_artist(album_id)
+                artist_ok[album_id] = ((not artists or any_match(artists, name, args.skip_the))
+                                      and (not initial or artist_initial(name, args.skip_the) == initial))
             if not artist_ok[album_id]:
                 continue
         if albums and not any_match(albums, lib.album_title(album_id), args.skip_the):
@@ -2381,8 +2396,11 @@ class App:
             value = text(body.get(key)).strip()
             return [value] if value else None
 
+        initial = body.get("artist_initial")
+        if initial is not None and initial not in ("#", *"ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+            raise Fail("Choose an artist group from A-Z or #.")
         args = SimpleNamespace(
-            artist=one("artist"), track_artist=one("track_artist"), album=one("album"), genre=one("genre"),
+            artist_initial=initial, artist=one("artist"), track_artist=one("track_artist"), album=one("album"), genre=one("genre"),
             year=one("year"), format=one("format"), tag=one("tag"), playlist=one("playlist"),
             album_id=None, track_id=None, skip_the=bool(body.get("skip_the")), all=bool(body.get("all")))
         albums = []
@@ -3219,6 +3237,8 @@ a.button {
 #crate #letters { border-color: var(--shell-line); }
 #crate #letters button { color: var(--shell-muted); }
 #crate #letters button[aria-pressed=true] { background: var(--shell-accent); color: var(--shell); }
+.head button.sort { width: 100%; border: 0; border-radius: 0; padding: 0; min-height: 40px; background: transparent; color: inherit; font: inherit; text-align: inherit; }
+.head button.sort:hover { color: var(--ink); text-decoration: underline; }
 #artistList { overflow: auto; flex: 1; padding: 6px 6px 16px; }
 .artist {
   display: flex; width: 100%; justify-content: space-between; gap: 8px; text-align: left;
@@ -3426,6 +3446,7 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
     <div id="signinIdle">
       <p>Sign in on the official iBroadcast website in a separate window. Approve the connection and ibfetch continues automatically. Your password stays on iBroadcast.</p>
       <button id="signinBtn" class="primary">Sign in with iBroadcast</button>
+      <p class="hint">Using another account? Choose Switch User on iBroadcast's page if your browser remembers the previous one.</p>
     </div>
     <div id="signinWait" hidden>
       <p id="signinStatus" role="status">Opening the iBroadcast sign-in window…</p>
@@ -3557,6 +3578,7 @@ const LETTERS = ["All", "#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 let S = null, meta = null, metaVersion = 0, settingsApplied = false, misses = 0;
 let searchGeneration = 0, sessionVersion = null, metadataLoadingVersion = null, downloadStarting = false;
+let signingOut = false, activeInitial = null, sortColumn = null, sortDirection = 1;
 let updatePreferenceRevision = 0, updatePreferencePending = false;
 let results = [], checked = new Set(), lastClick = -1, letter = "All", activeArtist = null;
 const queue = new Map();
@@ -3680,17 +3702,27 @@ function showBye() {
   document.querySelectorAll(".top button, #account, #libInfo").forEach((el) => { el.hidden = true; });
 }
 
+function resetLibraryView() {
+  searchGeneration++;
+  results = []; checked.clear(); expanded.clear(); queue.clear(); lastClick = -1;
+  meta = null; metaVersion = 0; metadataLoadingVersion = null;
+  letter = "All"; activeArtist = null; activeInitial = null;
+  for (const id of ["artistFind", "fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
+  $("fArtist").placeholder = "4hero or A*";
+  for (const [id, label] of [["fFormat", "Any format"], ["fTag", "Any tag"], ["fPlaylist", "Any playlist"]]) {
+    $(id).innerHTML = `<option value="">${label}</option>`; $(id).value = "";
+  }
+  $("fTag").disabled = $("fPlaylist").disabled = true;
+  for (const id of ["artistList", "letters", "genreList"]) $(id).innerHTML = "";
+  $("resultInfo").textContent = "";
+  renderQueue(); renderResultsEmpty();
+}
+
 function render() {
   renderUpdates(S.updates);
   if (sessionVersion !== S.session) {
     sessionVersion = S.session;
-    searchGeneration++;
-    results = []; checked.clear(); expanded.clear(); queue.clear();
-    meta = null; metaVersion = 0; metadataLoadingVersion = null;
-    $("artistList").innerHTML = "";
-    $("letters").innerHTML = "";
-    $("resultInfo").textContent = "";
-    renderQueue();
+    resetLibraryView();
   }
   const signed = S.signed_in;
   $("signin").hidden = signed;
@@ -3816,6 +3848,7 @@ async function openSignInChild(login, serial, reserved = null) {
   renderLogin();
 }
 async function beginSignIn() {
+  if (signingOut) return;
   if (signInFlow.opening) return;
   const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
   closeSignInChild(); signInFlow.requestId = ""; signInFlow.popup = reserved;
@@ -3872,8 +3905,8 @@ function renderLogin() {
   }
   $("signinIdle").hidden = !!(waiting || starting);
   $("signinWait").hidden = !(waiting || starting);
-  $("signinBtn").disabled = !!starting;
-  $("signinOpen").disabled = !!starting;
+  $("signinBtn").disabled = !!starting || signingOut;
+  $("signinOpen").disabled = !!starting || signingOut;
   $("signinFallback").hidden = !waiting;
   $("signinError").hidden = login?.state !== "error";
   if (login?.state === "error") $("signinError").textContent = login.message;
@@ -3893,6 +3926,25 @@ if (typeof window.ibfetchSignIn?.onClosed === "function") window.ibfetchSignIn.o
     $("signinFallback").open = true; renderLogin();
   } else cancelSignIn();
 });
+
+async function signOut() {
+  if (signingOut || !confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
+  signingOut = true;
+  try {
+    await api("/api/logout", {});
+    if (stopped) return;
+    loginRevision++; statePollSerial++;
+    ++signInFlow.serial; closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+    S = {...S, signed_in: false, session: null, user: null, login: null, transfer: null, can_retry: false,
+      library: {state: "none", version: 0, counts: null, error: ""}};
+    sessionVersion = null;
+    resetLibraryView(); render();
+    if (typeof window.ibfetchSignIn?.reset === "function" && !await window.ibfetchSignIn.reset()) {
+      notice("The sign-in window could not be reset. Choose Switch User on iBroadcast's sign-in page when connecting another account.", true);
+    }
+  } catch (error) { notice(error.message, true); }
+  finally { signingOut = false; if (!stopped) { renderLogin(); poll(); } }
+}
 
 /* library index */
 async function loadMeta(version) {
@@ -3929,7 +3981,7 @@ function letterOf(name) {
   let f = fold(name);
   if ($("fSkipThe").checked && f.startsWith("the ")) f = f.slice(4);
   const c = f.charAt(0).toUpperCase();
-  return c >= "A" && c <= "Z" ? c : "#";
+  return /^[A-Z]$/.test(c) ? c : "#";
 }
 
 function renderLetters() {
@@ -3945,9 +3997,9 @@ function renderArtists() {
   else if (letter !== "All") list = list.filter((a) => letterOf(a[0]) === letter);
   const cap = 500;
   let html = "";
-  if (!q && letter !== "All" && letter !== "#" && list.length) {
+  if (!q && letter !== "All" && list.length) {
     const albums = list.reduce((n, a) => n + a[1], 0);
-    html += `<button type="button" class="artist every" data-pattern="${letter}*" aria-pressed="${activeArtist === letter + "*"}">` +
+    html += `<button type="button" class="artist every" data-initial="${letter}" aria-pressed="${activeInitial === letter}">` +
             `<span class="name">Every artist on ${letter}</span><span class="count">${num(albums)}</span></button>`;
   }
   for (const [name, albums] of list.slice(0, cap)) {
@@ -3962,7 +4014,7 @@ function renderArtists() {
 /* searching */
 function filters() {
   return {
-    artist: $("fArtist").value, album: $("fAlbum").value, track_artist: $("fTrackArtist").value,
+    artist: $("fArtist").value, artist_initial: activeInitial, album: $("fAlbum").value, track_artist: $("fTrackArtist").value,
     year: $("fYear").value, genre: $("fGenre").value, format: $("fFormat").value, tag: $("fTag").value,
     playlist: $("fPlaylist").value, skip_the: $("fSkipThe").checked,
   };
@@ -3971,7 +4023,7 @@ function filters() {
 async function search() {
   const generation = ++searchGeneration;
   const f = filters();
-  const any = ["artist", "album", "track_artist", "year", "genre", "format", "tag", "playlist"].some((k) => String(f[k]).trim());
+  const any = ["artist_initial", "artist", "album", "track_artist", "year", "genre", "format", "tag", "playlist"].some((k) => String(f[k] || "").trim());
   if (!any) { notice("Pick an artist or fill in a field first."); return; }
   if (!S || S.library.state !== "ready") { notice("The library is still loading."); return; }
   $("resultInfo").textContent = "Searching";
@@ -3979,6 +4031,7 @@ async function search() {
     const r = await api("/api/select", f);
     if (generation !== searchGeneration) return;
     results = r.albums;
+    orderResults();
   } catch (e) {
     if (generation !== searchGeneration) return;
     results = [];
@@ -4002,6 +4055,28 @@ function renderResultsEmpty(message) {
   $("addSelBtn").disabled = $("addAllBtn").disabled = true;
 }
 
+const RESULT_COLLATOR = new Intl.Collator(undefined, {numeric: true, sensitivity: "base"});
+const SORT_COLUMNS = [["artist", "Artist"], ["title", "Album"], ["year", "Year"],
+  ["tracks", "Tracks"], ["formats", "Format"], ["length", "Length"]];
+function orderResults() {
+  if (!sortColumn) return;
+  const compareText = (a, b) => RESULT_COLLATOR.compare(String(a || ""), String(b || ""));
+  results.sort((a, b) => {
+    const value = item => sortColumn === "tracks" ? item.tracks.length : item[sortColumn];
+    const primary = ["year", "tracks", "length"].includes(sortColumn)
+      ? (Number(value(a)) || 0) - (Number(value(b)) || 0) : compareText(value(a), value(b));
+    return primary * sortDirection || compareText(a.artist, b.artist) || compareText(a.title, b.title)
+      || (a.disc || 0) - (b.disc || 0) || a.id - b.id;
+  });
+}
+function sortResults(column) {
+  if (!SORT_COLUMNS.some(([key]) => key === column)) return;
+  sortDirection = sortColumn === column ? -sortDirection : 1;
+  sortColumn = column;
+  orderResults(); lastClick = -1; expanded.clear(); renderResults();
+  $("results").querySelector(`button[data-sort="${column}"]`)?.focus();
+}
+
 function renderResults() {
   if (!results.length) {
     renderResultsEmpty("No albums match. Check the spelling, or use * for any text, like *floyd*.");
@@ -4009,7 +4084,8 @@ function renderResults() {
     return;
   }
   const head = `<div class="grid-row head" role="row"><div class="c-chk"><input type="checkbox" id="allBox" aria-label="Select all albums"></div>` +
-    `<div>Artist</div><div>Album</div><div class="num">Year</div><div class="num">Tracks</div><div>Format</div><div class="num">Length</div></div>`;
+    SORT_COLUMNS.map(([key, label]) => `<div role="columnheader" aria-sort="${sortColumn === key ? (sortDirection === 1 ? "ascending" : "descending") : "none"}"${["year", "tracks", "length"].includes(key) ? ' class="num"' : ""}>` +
+      `<button type="button" class="sort" data-sort="${key}" title="Sort by ${label.toLowerCase()}">${label}${sortColumn === key ? (sortDirection === 1 ? " ↑" : " ↓") : ""}</button></div>`).join("") + `</div>`;
   const rows = results.map((a, i) => rowHtml(a, i)).join("");
   $("results").innerHTML = head + rows;
   $("results").scrollTop = 0;
@@ -4245,14 +4321,7 @@ if (typeof window !== "undefined") window.addEventListener("beforeunload", e => 
 $("signinBtn").addEventListener("click", beginSignIn);
 $("signinOpen").addEventListener("click", reopenSignIn);
 $("signinCancel").addEventListener("click", cancelSignIn);
-$("signoutBtn").addEventListener("click", async () => {
-  if (!confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
-  try {
-    await api("/api/logout", {});
-    queue.clear(); results = []; meta = null; metaVersion = 0;
-    renderQueue(); poll();
-  } catch (e) { notice(e.message, true); }
-});
+$("signoutBtn").addEventListener("click", signOut);
 $("refreshBtn").addEventListener("click", async () => {
   try { await api("/api/library", { refresh: true }); notice("Fetching the library index again."); poll(); } catch (e) { notice(e.message, true); }
 });
@@ -4277,10 +4346,15 @@ $("artistFind").addEventListener("input", renderArtists);
 $("artistList").addEventListener("click", (e) => {
   const b = e.target.closest("button.artist");
   if (!b) return;
-  activeArtist = b.dataset.pattern || b.dataset.name;
-  $("fArtist").value = activeArtist;
+  activeInitial = b.dataset.initial || null;
+  activeArtist = activeInitial ? null : b.dataset.name;
+  $("fArtist").value = activeArtist || "";
+  $("fArtist").placeholder = activeInitial ? `Every artist on ${activeInitial}` : "4hero or A*";
   renderArtists();
   search();
+});
+$("fArtist").addEventListener("input", () => {
+  activeInitial = null; $("fArtist").placeholder = "4hero or A*";
 });
 $("fSkipThe").addEventListener("change", renderArtists);
 $("filters").addEventListener("submit", (e) => { e.preventDefault(); activeArtist = $("fArtist").value; renderArtists(); search(); });
@@ -4288,7 +4362,7 @@ $("clearBtn").addEventListener("click", () => {
   searchGeneration++;
   for (const id of ["fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
   for (const id of ["fFormat", "fTag", "fPlaylist"]) $(id).value = "";
-  activeArtist = null;
+  activeArtist = null; activeInitial = null; $("fArtist").placeholder = "4hero or A*";
   results = []; checked.clear();
   renderArtists();
   renderResultsEmpty();
@@ -4296,6 +4370,8 @@ $("clearBtn").addEventListener("click", () => {
 });
 
 $("results").addEventListener("click", (e) => {
+  const sort = e.target.closest("button[data-sort]");
+  if (sort) { sortResults(sort.dataset.sort); return; }
   if (e.target.id === "allBox") {
     const on = e.target.checked;
     checked = on ? new Set(results.map((a) => a.id)) : new Set();

@@ -150,14 +150,18 @@ See [Electron's security guidance](https://www.electronjs.org/docs/latest/tutori
 Sign in opens the official HTTPS iBroadcast page in a child window with its own
 persistent cookie partition. It has no preload, Node access or app API access.
 The trusted local page has a narrow sign-in-only bridge: open/close by opaque
-attempt ID and window-close notifications. The main process reads the validated
+attempt ID, window-close notifications and reset of its isolated provider session
+following a verified completed sign-out. The main process reads the validated
 provider URL from the authenticated local backend; JavaScript never supplies a
 remote URL or receives OAuth tokens through this bridge.
 
 Approval closes the child and returns focus to the main window. Closing it cancels
 only the matching pending attempt. Expiry, denial and load failures return to the
 app; the normal browser and manual code remain available. Existing saved ibfetch
-sessions are unchanged. The terminal continues to print its approval link/code.
+sessions are unchanged. Explicit Sign out also clears this app's isolated provider
+cookies/storage/cache, after checking the backend has no connected account or
+pending approval. New windows wait for that reset; app preferences and other
+browser/Tagcast sessions are untouched. The terminal continues to print its approval link/code.
 
 Developer ID build instructions and required secrets are documented in
 [code-signing.md](code-signing.md). Signed status must describe the actual release

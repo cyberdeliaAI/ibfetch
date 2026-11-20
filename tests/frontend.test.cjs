@@ -36,6 +36,7 @@ function harness({events = false, appearance = "auto", palette = "forest", dark 
   vm.runInContext(scripts[0], context);
   vm.runInContext(code, context);
   const run = (source) => vm.runInContext(source, context);
+  run(`globalThis.originalRenderResults = renderResults; globalThis.originalRenderResultsEmpty = renderResultsEmpty;`);
   run(`notice = () => {}; refreshRow = () => {}; updateResultBar = () => {};
        renderQueue = () => {}; renderResults = () => {}; renderResultsEmpty = () => {};`);
   return {run, node, media, document};
@@ -390,4 +391,118 @@ test("quitting closes the sign-in popup and discards a late state response", asy
   assert.equal(h.node("signin").hidden,true);
   assert.equal(h.node("bye").hidden,false);
   assert.equal(h.run("S.login"),null);
+});
+
+
+test("the # group selects every matching artist, including those beyond the sidebar cap", async () => {
+  const h=harness({events:true});
+  h.run(`S={library:{state:"ready"}}; letter="#";
+    meta={artists:Array.from({length:605},(_,i)=>[i+" Artist",1])};
+    renderArtists(); api=async(path,body)=>{globalThis.sent={path,body};return {albums:[]};};`);
+  assert.ok(h.node("artistList").innerHTML.includes('data-initial="#"'));
+  assert.ok(h.node("artistList").innerHTML.includes('Every artist on #'));
+  assert.ok(h.node("artistList").innerHTML.includes('105 more'));
+  h.node("fGenre").value="Jazz";
+  h.node("artistList").listeners.click({target:{closest:()=>({dataset:{initial:"#"}})}});
+  assert.equal(h.run('sent.body.artist_initial'),"#");
+  assert.equal(h.run('sent.body.artist'),"");
+  assert.equal(h.run('sent.body.genre'),"Jazz");
+  assert.equal(h.node("fArtist").placeholder,"Every artist on #");
+  h.node("clearBtn").listeners.click();assert.equal(h.run('activeInitial'),null);
+});
+
+test("typing an artist replaces a group without changing literal wildcard semantics", () => {
+  const h=harness({events:true});
+  h.run('activeInitial="#";');h.node("fArtist").value="#*";
+  h.node("fArtist").listeners.input();
+  assert.equal(h.run('filters().artist_initial'),null);
+  assert.equal(h.run('filters().artist'),"#*");
+  for(const [name,expected] of [["10cc","#"],["# Hash","#"],["(Moods)","#"],["日本","#"],["ß Band","#"],["Élan","E"],["Zulu","Z"]])
+    assert.equal(h.run(`letterOf(${JSON.stringify(name)})`),expected);
+  h.node("fSkipThe").checked=true;
+  assert.equal(h.run('letterOf("The 2 Bears")'),"#");
+});
+
+test("album sorting toggles natural order while preserving selected albums and the queue", () => {
+  const h=harness({events:true});
+  h.run(`results=[{id:1,title:"Album 10",artist:"Zulu",year:2000,tracks:[1],formats:"FLAC",length:1},
+    {id:2,title:"Album 2",artist:"Artist",year:1990,tracks:[2],formats:"FLAC",length:2}];
+    checked.add(2);queue.set(2,results[1]);expanded.set(1,true);lastClick=1;sortResults("title");`);
+  assert.deepEqual(Array.from(h.run('results.map(a=>a.id)')),[2,1]);
+  assert.equal(h.run('checked.has(2) && queue.has(2)'),true);
+  assert.equal(h.run('expanded.size'),0);assert.equal(h.run('lastClick'),-1);
+  h.run('originalRenderResults()');
+  assert.ok(h.node('results').innerHTML.includes('aria-sort="ascending"'));
+  assert.ok(h.node('results').innerHTML.includes('data-sort="title"'));
+  h.node('results').listeners.click({target:{closest:s=>s==='button[data-sort]'?{dataset:{sort:'title'}}:null}});
+  assert.deepEqual(Array.from(h.run('results.map(a=>a.id)')),[1,2]);
+  assert.equal(h.run('checked.has(2) && queue.has(2)'),true);
+});
+
+test("chosen album sorting is applied to new searches and numeric columns sort as numbers", async () => {
+  const h=harness();
+  h.run(`S={library:{state:"ready"}}; sortResults("title"); filters=()=>({artist:"Artist"});
+    api=async()=>({albums:[{id:1,title:"Z",year:2000,tracks:[1,2]}, {id:2,title:"A",year:1999,tracks:[3]}]});`);
+  await h.run('search()');assert.deepEqual(Array.from(h.run('results.map(a=>a.id)')),[2,1]);
+  h.run('sortResults("tracks")');assert.deepEqual(Array.from(h.run('results.map(a=>a.id)')),[2,1]);
+  h.run('sortResults("year")');assert.deepEqual(Array.from(h.run('results.map(a=>a.id)')),[2,1]);
+});
+
+test("sign-out removes old account rows and filters before waiting for provider cookie reset", async () => {
+  let release,resetCalls=0;
+  const h=harness({window:{ibfetchSignIn:{reset:()=>{resetCalls++;return new Promise(resolve=>{release=resolve;});}}}});
+  h.run(`S={session:1,signed_in:true,library:{state:"ready",version:1},user:{name:"First",premium:true}};
+    sessionVersion=1; meta={artists:[["First Artist",1]]}; letter="#"; activeInitial="#";
+    results=[{id:1,title:"Old account album"}];checked.add(1);queue.set(1,results[0]);expanded.set(1,true);
+    renderResultsEmpty=originalRenderResultsEmpty;api=async()=>({});poll=async()=>{};`);
+  h.node('results').innerHTML='Old account album';h.node('fArtist').value='First Artist';
+  h.node('artistFind').value='First';h.node('fTag').value='Old tag';h.node('outDir').value='/keep/output';
+  const pending=h.run('signOut()');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(resetCalls,1);assert.equal(h.run('signingOut'),true);
+  assert.equal(h.run('S.signed_in'),false);assert.equal(h.run('queue.size + results.length + checked.size'),0);
+  assert.equal(h.run('activeInitial'),null);assert.equal(h.node('fArtist').value,'');assert.equal(h.node('fTag').value,'');
+  assert.equal(h.node('artistFind').value,'');assert.equal(h.node('outDir').value,'/keep/output');
+  assert.ok(!h.node('results').innerHTML.includes('Old account album'));
+  await h.run('beginSignIn()');assert.equal(h.run('signInFlow.opening'),false);
+  release(true);await pending;assert.equal(h.run('signingOut'),false);assert.equal(h.node('signinBtn').disabled,false);
+});
+
+test("a ready second account cannot display first-account rows while its metadata arrives", () => {
+  const h=harness();
+  h.run(`S={session:2,signed_in:true,library:{state:"ready",version:2},user:{name:"Second",premium:true}};
+    sessionVersion=1;loadMeta=()=>{};renderResultsEmpty=originalRenderResultsEmpty;
+    results=[{id:1,title:"First album"}];queue.set(1,results[0]);`);
+  h.node('results').innerHTML='First album';h.node('fArtist').value='First Artist';h.run('render()');
+  assert.equal(h.node('fArtist').value,'');assert.equal(h.run('results.length'),0);
+  assert.equal(h.run('queue.size'),0);assert.ok(!h.node('results').innerHTML.includes('First album'));
+});
+
+test("a refused backend logout preserves the connected account and queue", async () => {
+  let resets=0;
+  const h=harness({window:{ibfetchSignIn:{reset:async()=>{resets++;return true;}}}});
+  h.run(`S={session:1,signed_in:true,library:{state:"ready"}};queue.set(1,{id:1});
+    api=async()=>{throw Error("Stop the download before signing out");};poll=()=>{};`);
+  await h.run('signOut()');
+  assert.equal(h.run('S.signed_in'),true);assert.equal(h.run('queue.size'),1);assert.equal(resets,0);
+});
+
+test("quitting while sign-out is pending cannot restore the sign-in screen", async () => {
+  const h=harness();
+  h.run(`S={session:1,signed_in:true,library:{state:"ready"}};
+    api=()=>new Promise(resolve=>{globalThis.finishSignOut=resolve;});
+    render=()=>{throw Error("must not render after quit");};poll=()=>{throw Error("must not poll after quit");};`);
+  const pending=h.run('signOut()');h.run('stopped=true;finishSignOut({});');await pending;
+  assert.equal(h.run('signingOut'),false);
+});
+
+test("browser sign-out discards an old account's in-flight search without a native bridge", async () => {
+  const h=harness();
+  h.run(`S={session:1,signed_in:true,library:{state:"ready",version:1}};
+    renderResultsEmpty=originalRenderResultsEmpty;
+    api=()=>new Promise(resolve=>{globalThis.finishOldSearch=resolve;});`);
+  h.node('fArtist').value='First Artist';const search=h.run('search()');
+  h.run('api=async()=>({});poll=()=>{};');await h.run('signOut()');
+  h.run('finishOldSearch({albums:[{id:1,title:"Old account album"}]});');await search;
+  assert.equal(h.run('S.signed_in'),false);assert.equal(h.run('results.length'),0);
+  assert.ok(!h.node('results').innerHTML.includes('Old account album'));
 });

@@ -26,7 +26,9 @@ function fixture(requestHandler) {
   Object.assign(owner,{webContents:new Contents(origin),isDestroyed:()=>false,isMinimized:()=>false,
     getBounds:()=>({x:0,y:0,width:1280,height:800}),show(){},focus(){this.focused=true;}});
   const ipcMain=new EventEmitter(); ipcMain.handle=(name,fn)=>handlers.set(name,fn); ipcMain.removeHandler=name=>handlers.delete(name);
-  const ses=new EventEmitter();
+  const ses=new EventEmitter(), cleared=[];
+  Object.assign(ses,{async closeAllConnections(){cleared.push("connections");},
+    async clearStorageData(){cleared.push("storage");},async clearCache(){cleared.push("cache");}});
   Object.assign(ses,{setPermissionCheckHandler(fn){this.permissionCheck=fn;},setPermissionRequestHandler(fn){this.permissionRequest=fn;},
     setDevicePermissionHandler(fn){this.devicePermission=fn;},webRequest:{onBeforeRequest(fn){ses.beforeRequest=fn;}}});
   const deps={BrowserWindow:Window,ipcMain,session:{fromPartition(value){assert.equal(value,SIGN_IN_PARTITION);return ses;}},
@@ -35,7 +37,7 @@ function fixture(requestHandler) {
     return requestHandler ? requestHandler(path,body) : path==='/api/state'?{login:device(id)}:{ok:true};};
   const controller=installSignIn(owner,origin,deps,request);
   const event={sender:owner.webContents,senderFrame:owner.webContents.mainFrame};
-  return {controller,owner,views,handlers,ipcMain,ses,event,requests,
+  return {controller,owner,views,handlers,ipcMain,ses,event,requests,cleared,
     open:(value=id,from=event)=>handlers.get('signin:open')(from,value)};
 }
 
@@ -144,4 +146,43 @@ test("local sign-in API uses fixed endpoints and rejects malformed or oversized 
   await assert.rejects(signInApi(base,'/api/save',{}),/Invalid sign-in operation/);assert.equal(seen.length,2);
   body='not JSON';await assert.rejects(signInApi(base,'/api/state'),/Invalid sign-in status/);
   body='x'.repeat(1048577);await assert.rejects(signInApi(base,'/api/state'),/Sign-in status unavailable/);
+});
+
+
+test("explicit completed sign-out clears only ibfetch's provider partition",async()=>{
+  const f=fixture(()=>({signed_in:false,login:null}));
+  assert.equal(await f.handlers.get("signin:reset")(f.event),true);
+  assert.deepEqual(f.cleared,["connections","storage","cache"]);
+  assert.deepEqual(f.requests,[{path:"/api/state",body:undefined}]);
+  f.owner.emit("closed");assert.equal(f.handlers.has("signin:reset"),false);
+});
+
+test("provider reset refuses untrusted frames, active accounts and pending approval",async()=>{
+  const f=fixture(()=>({signed_in:false,login:null}));
+  for(const event of [{},{...f.event,senderFrame:{}}]) assert.equal(await f.handlers.get("signin:reset")(event),false);
+  assert.deepEqual(f.requests,[]);
+  for(const state of [{},{signed_in:true,login:null},{signed_in:false,login:device(id)}]) {
+    const active=fixture(()=>state);
+    assert.equal(await active.handlers.get("signin:reset")(active.event),false);
+    assert.deepEqual(active.cleared,[]);
+  }
+});
+
+test("a new provider window waits for clearing to finish before loading another account",async()=>{
+  let state={signed_in:false,login:null},release;
+  const f=fixture(()=>state);
+  f.ses.clearStorageData=()=>new Promise(resolve=>{release=resolve;});
+  const clearing=f.handlers.get("signin:reset")(f.event);await tick();
+  state={signed_in:false,login:device(nextId)};
+  const opening=f.open(nextId);await tick();assert.equal(f.views.length,0);
+  release();assert.equal(await clearing,true);assert.equal(await opening,true);
+  assert.equal(f.views[0].webContents.getURL(),device(nextId).url);
+});
+
+test("a failed provider reset is reported without blocking future attempts",async()=>{
+  const f=fixture(()=>({signed_in:false,login:null}));
+  f.ses.clearStorageData=async()=>{throw Error("private provider failure");};
+  assert.equal(await f.handlers.get("signin:reset")(f.event),false);
+  f.ses.clearStorageData=async()=>{};
+  assert.equal(await f.handlers.get("signin:reset")(f.event),true);
 });

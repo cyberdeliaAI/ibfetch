@@ -57,7 +57,7 @@ function signInApi(address, pathname, body) {
 function installSignIn(owner, address, dependencies = require("electron"), request = signInApi) {
   const {BrowserWindow, ipcMain, session, screen} = dependencies, contents = owner.webContents;
   const origin = new URL(address).origin;
-  let current = null, serial = 0;
+  let current = null, serial = 0, resetPending = null;
   const fromOwner = event => !contents.isDestroyed() && event.sender === contents
     && event.senderFrame === contents.mainFrame && applicationUrl(contents.getURL(), origin);
   const notify = (entry, reason) => {
@@ -85,6 +85,7 @@ function installSignIn(owner, address, dependencies = require("electron"), reque
   }
 
   async function open(id) {
+    if (resetPending) await resetPending;
     if (!signInRequestId(id) || owner.isDestroyed()) return false;
     if (current?.id === id && current.view && !current.view.isDestroyed()) {
       current.view.show(); current.view.focus(); return true;
@@ -133,15 +134,35 @@ function installSignIn(owner, address, dependencies = require("electron"), reque
     } catch { end(entry); return false; }
   }
 
+  function reset() {
+    if (resetPending) return resetPending;
+    const generation = serial;
+    resetPending = (async () => {
+      // Only explicit, completed app sign-out may forget this app's provider
+      // cookies. Never reset a live account, pending approval or another session.
+      const status = await request(address, "/api/state");
+      if (status?.signed_in !== false || status.login || serial !== generation || owner.isDestroyed()) return false;
+      if (current) end(current);
+      const resetSerial = serial;
+      await ses.closeAllConnections();
+      if (serial !== resetSerial || owner.isDestroyed()) return false;
+      await ses.clearStorageData();
+      await ses.clearCache();
+      return true;
+    })().catch(() => false).finally(() => { resetPending = null; });
+    return resetPending;
+  }
+
   const close = (event, id) => { if (fromOwner(event) && current?.id === id) end(current, {restore: true}); };
   ipcMain.handle("signin:open", (event, id) => fromOwner(event) ? open(id) : false);
+  ipcMain.handle("signin:reset", event => fromOwner(event) ? reset() : false);
   ipcMain.on("signin:close", close);
   contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
     if (mainFrame && !inPlace) end(current, {cancel: true});
   });
   owner.on("closed", () => {
     end(current, {cancel: true});
-    ipcMain.removeHandler("signin:open"); ipcMain.removeListener("signin:close", close);
+    ipcMain.removeHandler("signin:open"); ipcMain.removeHandler("signin:reset"); ipcMain.removeListener("signin:close", close);
     ses.removeListener("will-download", denyDownload);
   });
   return {get window() { return current?.view || null; }};
