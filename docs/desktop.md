@@ -16,7 +16,7 @@ macOS, ibfetch.exe on Windows, or ibfetch/ibfetch on Linux. Python is bundled;
 Node.js/npm are only needed to build the app. For other architectures or a
 terminal-only system, use the Python/browser or CLI version in the README.
 
-Sign-in approval opens in your system browser. Settings use ibfetch's normal
+Sign-in approval opens in a separate iBroadcast window, with a system-browser fallback. Settings use ibfetch's normal
 platform directory; the Electron profile is separate. Closing the app stops its
 owned backend. Saved music and sign-in settings survive an upgrade/uninstall.
 
@@ -24,7 +24,7 @@ owned backend. Saved music and sign-in settings survive an upgrade/uninstall.
 
 ### macOS
 
-The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
+The official 1.7.0 Mac downloads are Developer ID signed and notarized by Apple,
 with the ticket attached. Move `ibfetch.app` to Applications and open it. Confirm
 macOS's normal first-launch prompt for a downloaded app if shown. Keep the overall
 system security settings enabled. Historical downloads retain their original
@@ -48,7 +48,7 @@ computer may prohibit unsigned apps. Do not disable system-wide protections.
 Extract and run from a graphical desktop:
 
 ```sh
-tar -xzf ibfetch-1.6.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.7.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -63,20 +63,20 @@ Each release archive has a .sha256 companion. Keep both in the same folder.
 macOS:
 
 ```sh
-shasum -a 256 -c ibfetch-1.6.0-macos-arm64.zip.sha256
+shasum -a 256 -c ibfetch-1.7.0-macos-arm64.zip.sha256
 ```
 
 Linux:
 
 ```sh
-sha256sum -c ibfetch-1.6.0-linux-x64.tar.gz.sha256
+sha256sum -c ibfetch-1.7.0-linux-x64.tar.gz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\ibfetch-1.6.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\ibfetch-1.6.0-windows-x64.zip.sha256
+Get-FileHash .\ibfetch-1.7.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\ibfetch-1.7.0-windows-x64.zip.sha256
 ```
 
 Compare the 64-character digest exactly. A checksum checks download integrity;
@@ -132,7 +132,7 @@ configured; it does not depend on the build machine's Python certificate paths.
   browser servers are never reused or killed.
 - The renderer has sandbox, context isolation and web security enabled, with Node
   integration, webviews and arbitrary navigation disabled. The trusted app page
-  has only the narrow sign-in bridge described below; the provider window has none.
+  has narrow sign-in and update bridges described below; the provider window has none.
   External links are restricted to iBroadcast approval/attribution and fixed project
   release, Tests and MIT-license pages.
 - The shared page uses hashed inline scripts, a private per-run URL, authenticated
@@ -149,15 +149,19 @@ See [Electron's security guidance](https://www.electronjs.org/docs/latest/tutori
 
 Sign in opens the official HTTPS iBroadcast page in a child window with its own
 persistent cookie partition. It has no preload, Node access or app API access.
-The trusted local page has a narrow sign-in-only bridge: open/close by opaque
-attempt ID and window-close notifications. The main process reads the validated
+The trusted local page has a narrow sign-in bridge: open/close by opaque
+attempt ID, window-close notifications and reset of its isolated provider session
+following a verified completed sign-out. The main process reads the validated
 provider URL from the authenticated local backend; JavaScript never supplies a
 remote URL or receives OAuth tokens through this bridge.
 
 Approval closes the child and returns focus to the main window. Closing it cancels
 only the matching pending attempt. Expiry, denial and load failures return to the
 app; the normal browser and manual code remain available. Existing saved ibfetch
-sessions are unchanged. The terminal continues to print its approval link/code.
+sessions are unchanged. Explicit Sign out also clears this app's isolated provider
+cookies/storage/cache, after checking the backend has no connected account or
+pending approval. New windows wait for that reset; app preferences and other
+browser/Tagcast sessions are untouched. The terminal continues to print its approval link/code.
 
 Developer ID build instructions and required secrets are documented in
 [code-signing.md](code-signing.md). Signed status must describe the actual release
@@ -181,3 +185,16 @@ checks. Explicit desktop/signing builds always run the complete checks.
 
 Main and sign-in windows remember their normal size independently, constrained by
 the current display. These local preferences do not contain account information.
+
+## Desktop updates
+
+The header's version/update button opens release notes and the available update
+controls. Signed Mac release copies can download a future release and restart to
+install it after confirmation; Homebrew and portable copies keep their own upgrade
+route. See [desktop-updates.md](desktop-updates.md) for supported packages,
+preferences, shutdown guards and verification limits.
+
+The update bridge accepts only a stable version and fixed status/download/install/
+skip/preference actions. It accepts no URLs, file paths, shell commands or account
+data. Only the trusted main frame can call it. Installer metadata and package
+names are restricted to this project's official versioned GitHub release directory.

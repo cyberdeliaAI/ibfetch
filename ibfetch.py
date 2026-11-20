@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -308,7 +308,12 @@ def release_info(data):
     if not isinstance(tag, str) or not tag.startswith("v"):
         raise ValueError("Unsupported release tag")
     stable_version(tag[1:])
-    return {"version": tag[1:]}
+    result = {"version": tag[1:]}
+    if isinstance(data.get("name"), str):
+        result["name"] = data["name"][:200]
+    if isinstance(data.get("body"), str):
+        result["notes"] = data["body"][:50000]
+    return result
 
 
 class NoUpdateRedirect(urllib.request.HTTPRedirectHandler):
@@ -344,7 +349,8 @@ class UpdateChecker:
             if type(value) in (int, float) and 0 <= value <= time.time() and math.isfinite(value):
                 self.cache[key] = value
         try:
-            self.cache["latest"] = release_info({"tag_name": "v" + saved["latest"]["version"]})
+            self.cache["latest"] = release_info({"tag_name": "v" + saved["latest"]["version"],
+                "name": saved["latest"].get("name"), "body": saved["latest"].get("notes")})
         except (KeyError, TypeError, ValueError):
             pass
         if saved.get("error"):
@@ -355,6 +361,8 @@ class UpdateChecker:
             latest = self.cache.get("latest", {}).get("version")
             available = bool(latest and stable_version(latest) > stable_version(VERSION))
             return {"current": VERSION, "latest": latest, "available": available,
+                    "name": self.cache.get("latest", {}).get("name", ""),
+                    "notes": self.cache.get("latest", {}).get("notes", ""),
                     "url": RELEASES_URL + "/tag/v" + latest if available else RELEASES_URL + "/latest",
                     "checking": self.checking, "automatic": self.automatic,
                     "checked_at": self.cache.get("checked_at"), "error": bool(self.cache.get("error"))}
@@ -720,7 +728,9 @@ def load_library(session, home, refresh=False, quiet=False):
     status, _ = session.api("status")
     user = status.get("user") if isinstance(status.get("user"), dict) else {}
     state = status.get("status") if isinstance(status.get("status"), dict) else {}
-    user_id = text(user.get("id") or user.get("user_id"))
+    user_id = text(user.get("id") or user.get("user_id")).strip()
+    if not user_id:
+        raise Fail("iBroadcast did not return an account ID. Sign in again before loading a library.")
     premium = user.get("premium") in (True, 1, "1")
     lastmodified = text(state.get("lastmodified"))
     cache, meta_path = home / "library-cache.json.gz", home / "library-cache.meta.json"
@@ -762,9 +772,20 @@ def named_ids(table, pats, what):
     return ids
 
 
+def artist_initial(name, skip_the=False):
+    """Match the sidebar's A-Z/# groups, including accents and optional 'The'."""
+    value = unicodedata.normalize("NFKD", text(name))
+    value = " ".join("".join(c for c in value if not "\u0300" <= c <= "\u036f").lower().split())
+    if skip_the and value.startswith("the "):
+        value = value[4:]
+    initial = value[:1].upper()
+    return initial if len(initial) == 1 and "A" <= initial <= "Z" else "#"
+
+
 def select(lib, args):
     """Track IDs that pass every filter, grouped by album and sorted for display."""
     artists, track_artists = patterns(args.artist), patterns(args.track_artist)
+    initial = getattr(args, "artist_initial", None)
     albums, genres, formats = patterns(args.album), patterns(args.genre), patterns(args.format)
     years = [year_range(y) for y in args.year or []]
     album_ids = {number(i) for i in args.album_id or []}
@@ -778,7 +799,7 @@ def select(lib, args):
                 wanted.update(number(t) for t in table.get(i, "tracks") or [])
             only = wanted if only is None else only & wanted
 
-    any_filter = any((artists, track_artists, albums, genres, formats, years, album_ids, track_ids,
+    any_filter = any((artists, initial, track_artists, albums, genres, formats, years, album_ids, track_ids,
                       only is not None))
     if not any_filter and not args.all:
         raise Fail("Add at least one filter, like --artist \"4hero\", or use --all for everything.")
@@ -792,9 +813,11 @@ def select(lib, args):
         album_id = number(lib.tracks.get(track_id, "album_id"))
         if album_ids and album_id not in album_ids:
             continue
-        if artists:
+        if artists or initial:
             if album_id not in artist_ok:
-                artist_ok[album_id] = any_match(artists, lib.album_artist(album_id), args.skip_the)
+                name = lib.album_artist(album_id)
+                artist_ok[album_id] = ((not artists or any_match(artists, name, args.skip_the))
+                                      and (not initial or artist_initial(name, args.skip_the) == initial))
             if not artist_ok[album_id]:
                 continue
         if albums and not any_match(albums, lib.album_title(album_id), args.skip_the):
@@ -2381,8 +2404,11 @@ class App:
             value = text(body.get(key)).strip()
             return [value] if value else None
 
+        initial = body.get("artist_initial")
+        if initial is not None and initial not in ("#", *"ABCDEFGHIJKLMNOPQRSTUVWXYZ"):
+            raise Fail("Choose an artist group from A-Z or #.")
         args = SimpleNamespace(
-            artist=one("artist"), track_artist=one("track_artist"), album=one("album"), genre=one("genre"),
+            artist_initial=initial, artist=one("artist"), track_artist=one("track_artist"), album=one("album"), genre=one("genre"),
             year=one("year"), format=one("format"), tag=one("tag"), playlist=one("playlist"),
             album_id=None, track_id=None, skip_the=bool(body.get("skip_the")), all=bool(body.get("all")))
         albums = []
@@ -3219,6 +3245,8 @@ a.button {
 #crate #letters { border-color: var(--shell-line); }
 #crate #letters button { color: var(--shell-muted); }
 #crate #letters button[aria-pressed=true] { background: var(--shell-accent); color: var(--shell); }
+.head button.sort { width: 100%; border: 0; border-radius: 0; padding: 0; min-height: 40px; background: transparent; color: inherit; font: inherit; text-align: inherit; }
+.head button.sort:hover { color: var(--ink); text-decoration: underline; }
 #artistList { overflow: auto; flex: 1; padding: 6px 6px 16px; }
 .artist {
   display: flex; width: 100%; justify-content: space-between; gap: 8px; text-align: left;
@@ -3374,6 +3402,19 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .mini.busy i { animation: none; width: 100% !important; opacity: .45; }
   .meter .fill { transition: none; }
 }
+#updateDialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 18px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); overflow: auto; }
+#updateDialog::backdrop { background: #0008; }
+#updateDialog h2 { margin: 0 0 8px; font: 600 20px/1.3 var(--round); }
+#updateDialog p { margin: 8px 0; }
+.update-notes { max-height: 35vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-block: 10px; overflow-wrap: anywhere; line-height: 1.5; }
+.update-notes h3, .update-notes h4, .update-notes h5, .update-notes h6 { margin: 12px 0 6px; font-size: 15px; }
+.update-notes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-notes ul, .update-notes ol { padding-left: 22px; }
+.update-notes table { display: block; overflow-x: auto; border-collapse: collapse; }
+.update-notes th, .update-notes td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; }
+.native-update { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-block: 8px; }
+.native-update progress { width: 100%; height: 10px; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 </style>
 </head>
 <body>
@@ -3395,7 +3436,8 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
       <label class="check"><input type="checkbox" id="autoUpdates" checked> Automatically check for updates</label>
       <div class="row-gap"><button id="checkUpdates">Check for updates</button>
         <a id="updateLink" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Releases &amp; downloads</a></div>
-      <p>No account or library data is sent. Installation is manual; quit ibfetch before upgrading.</p>
+      <p>No account or library data is sent. Open update details for the installation options.</p>
+      <button id="updateDetails" hidden>View update details</button>
       <div class="row-gap project-links">
         <a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">Tests</a>
         <a href="https://github.com/cyberdeliaAI/ibfetch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>
@@ -3420,12 +3462,32 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   <button id="quitBtn" class="quiet">Quit</button>
 </header>
 
+<dialog id="updateDialog" aria-labelledby="updateDialogTitle">
+  <h2 id="updateDialogTitle">ibfetch updates</h2>
+  <p id="updateDialogVersion"></p><p id="updateDialogName"></p>
+  <div id="releaseNotes" class="update-notes" tabindex="0" hidden></div>
+  <section class="native-update">
+    <p id="desktopUpdateStatus" role="status" aria-live="polite"></p>
+    <progress id="desktopProgress" max="100" value="0" aria-label="Update download progress" hidden></progress>
+    <label id="desktopAutoLabel" class="check" hidden><input id="desktopAuto" type="checkbox"> Automatically download updates</label>
+    <p id="desktopConsent" hidden>Downloading never installs an update. Restart and installation need your confirmation.</p>
+    <div class="row-gap update-actions">
+      <button id="desktopDownload" class="primary" hidden>Download update</button>
+      <button id="desktopInstall" class="primary" hidden>Restart and install</button>
+      <button id="desktopSkip" hidden>Skip this version</button>
+    </div>
+  </section>
+  <div class="row-gap update-actions"><button id="updateLater">Later</button>
+    <a id="dialogRelease" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Official release &amp; downloads ↗</a></div>
+</dialog>
+
 <main id="signin" class="center" hidden>
   <div class="signin">
     <h1>Sign in to iBroadcast</h1>
     <div id="signinIdle">
       <p>Sign in on the official iBroadcast website in a separate window. Approve the connection and ibfetch continues automatically. Your password stays on iBroadcast.</p>
       <button id="signinBtn" class="primary">Sign in with iBroadcast</button>
+      <p class="hint">Using another account? Choose Switch User on iBroadcast's page if your browser remembers the previous one.</p>
     </div>
     <div id="signinWait" hidden>
       <p id="signinStatus" role="status">Opening the iBroadcast sign-in window…</p>
@@ -3557,6 +3619,7 @@ const LETTERS = ["All", "#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 let S = null, meta = null, metaVersion = 0, settingsApplied = false, misses = 0;
 let searchGeneration = 0, sessionVersion = null, metadataLoadingVersion = null, downloadStarting = false;
+let signingOut = false, activeInitial = null, sortColumn = null, sortDirection = 1;
 let updatePreferenceRevision = 0, updatePreferencePending = false;
 let results = [], checked = new Set(), lastClick = -1, letter = "All", activeArtist = null;
 const queue = new Map();
@@ -3680,17 +3743,27 @@ function showBye() {
   document.querySelectorAll(".top button, #account, #libInfo").forEach((el) => { el.hidden = true; });
 }
 
+function resetLibraryView() {
+  searchGeneration++;
+  results = []; checked.clear(); expanded.clear(); queue.clear(); lastClick = -1;
+  meta = null; metaVersion = 0; metadataLoadingVersion = null;
+  letter = "All"; activeArtist = null; activeInitial = null;
+  for (const id of ["artistFind", "fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
+  $("fArtist").placeholder = "4hero or A*";
+  for (const [id, label] of [["fFormat", "Any format"], ["fTag", "Any tag"], ["fPlaylist", "Any playlist"]]) {
+    $(id).innerHTML = `<option value="">${label}</option>`; $(id).value = "";
+  }
+  $("fTag").disabled = $("fPlaylist").disabled = true;
+  for (const id of ["artistList", "letters", "genreList"]) $(id).innerHTML = "";
+  $("resultInfo").textContent = "";
+  renderQueue(); renderResultsEmpty();
+}
+
 function render() {
   renderUpdates(S.updates);
   if (sessionVersion !== S.session) {
     sessionVersion = S.session;
-    searchGeneration++;
-    results = []; checked.clear(); expanded.clear(); queue.clear();
-    meta = null; metaVersion = 0; metadataLoadingVersion = null;
-    $("artistList").innerHTML = "";
-    $("letters").innerHTML = "";
-    $("resultInfo").textContent = "";
-    renderQueue();
+    resetLibraryView();
   }
   const signed = S.signed_in;
   $("signin").hidden = signed;
@@ -3718,13 +3791,243 @@ function render() {
   updateDownloadButton();
 }
 
+const desktopUpdate = {data: null, explicit: false, manualWaiting: false, manualCheckedAt: undefined, offerKey: ""};
+let releaseData = null, displayedReleaseNotes = "";
+
+function applyDesktopUpdate(value) {
+  if (!value || typeof value.supported !== "boolean") return;
+  if (Number.isSafeInteger(value.revision) && Number.isSafeInteger(desktopUpdate.data?.revision)
+      && value.revision < desktopUpdate.data.revision) return;
+  desktopUpdate.data = value;
+  if (releaseData) renderUpdates(releaseData);
+}
+function offerDesktopUpdate(data) {
+  if (desktopUpdate.manualWaiting && !data.checking) {
+    desktopUpdate.manualWaiting = false; desktopUpdate.manualCheckedAt = data.checked_at ?? null;
+  } else if (desktopUpdate.explicit && data.checked_at && desktopUpdate.manualCheckedAt !== undefined
+      && data.checked_at !== desktopUpdate.manualCheckedAt) desktopUpdate.explicit = false;
+  const bridge = window.ibfetchUpdates;
+  if (!bridge || typeof bridge.offer !== "function" || !data.available || !updateURL(data).includes("/tag/")) return;
+  const automatic = !desktopUpdate.explicit && data.automatic && !data.checking;
+  const key = JSON.stringify([data.latest, data.checked_at, !!automatic, desktopUpdate.data?.autoDownload === true]);
+  if (key === desktopUpdate.offerKey) return;
+  desktopUpdate.offerKey = key;
+  bridge.offer(data.latest, !!automatic).then(applyDesktopUpdate).catch(() => {});
+}
+function nativeUpdateText() {
+  const value = desktopUpdate.data;
+  if (!value) return "Use the official release download to update this copy.";
+  const errors = {download:"The update could not be downloaded or verified. Try again or use the official release download.",
+    preferences:"The update preference could not be saved. Your previous choice is kept.",
+    install:"The update could not be installed safely. Restart ibfetch or use the official release download.",
+    busy:"Finish or stop the download and empty the download list before installing."};
+  if (value.error) return errors[value.error] || errors.download;
+  if (!value.supported) return value.reason === "homebrew"
+    ? "Update this Homebrew copy with: brew upgrade --cask cyberdeliaAI/apps/ibfetch"
+    : "Use the official release download for this portable, browser or test copy.";
+  if (value.state === "downloading") return `Downloading update: ${value.progress}%`;
+  if (value.state === "checking") return "Checking the update package…";
+  if (value.state === "finishing") return "Closing ibfetch safely before installation…";
+  if (value.state === "ready") return "Update downloaded and verified. Installation needs your confirmation.";
+  return "Download the update when you are ready. Installation is always your choice.";
+}
+function refreshNativeUpdateControls() {
+  const value = desktopUpdate.data;
+  const supported = value?.supported === true;
+  const matching = supported && value.version === releaseData?.latest;
+  const busy = ["checking","downloading","finishing"].includes(value?.state);
+  const ready = ["ready","finishing"].includes(value?.state);
+  const active = downloadStarting || !!queue.size || ["ready","planning","running"].includes(S?.transfer?.state);
+  $("desktopUpdateStatus").textContent = matching && ready && active && !value.error
+    ? "The update is ready. Finish or stop the download and empty the download list before installing." : nativeUpdateText();
+  $("desktopDownload").hidden = !matching || ready;
+  $("desktopDownload").disabled = busy;
+  $("desktopInstall").hidden = !matching || !ready;
+  $("desktopInstall").disabled = busy || active;
+  $("desktopSkip").hidden = !matching;
+  $("desktopSkip").disabled = busy;
+  $("desktopAutoLabel").hidden = $("desktopConsent").hidden = !supported;
+  $("desktopAuto").checked = value?.autoDownload === true;
+  $("desktopAuto").disabled = value?.state === "finishing";
+  $("desktopProgress").hidden = value?.state !== "downloading";
+  $("desktopProgress").value = Number.isFinite(value?.progress) ? Math.max(0,Math.min(100,value.progress)) : 0;
+}
+function refreshUpdateDialog() {
+  const data = releaseData;
+  if (!data) return;
+  $("updateDialogTitle").textContent = data.available ? `ibfetch ${data.latest} is available` : "ibfetch updates";
+  $("updateDialogVersion").textContent = `You are running ibfetch ${data.current}.`;
+  $("updateDialogName").textContent = data.name || "";
+  $("dialogRelease").href = updateURL(data);
+  const notes = typeof data.notes === "string" ? data.notes.slice(0,50000) : "";
+  if (notes !== displayedReleaseNotes) { $("releaseNotes").innerHTML = renderReleaseNotes(notes); displayedReleaseNotes = notes; }
+  $("releaseNotes").hidden = !notes;
+  refreshNativeUpdateControls();
+}
+function openUpdateDialog() {
+  if (!releaseData?.available) return;
+  setUpdatePanel(false); refreshUpdateDialog();
+  if (!$("updateDialog").open) $("updateDialog").showModal();
+  $("updateLater").focus();
+}
+function closeUpdateDialog() { $("updateDialog").close(); $("updateBtn").focus(); }
+async function nativeUpdateAction(action, value = releaseData?.latest) {
+  const bridge = window.ibfetchUpdates;
+  if (!bridge || !["download","install","skip","configure"].includes(action)) return;
+  try {
+    const result = await bridge[action](value);
+    applyDesktopUpdate(result);
+    if (action === "skip" && !result?.error && result?.skipped === value) {
+      desktopUpdate.explicit = false; closeUpdateDialog(); if (releaseData) renderUpdates(releaseData);
+    }
+  } catch { notice("The update action could not be completed. Try again or use the official release download.",true); }
+}
+
+const UPDATE_NOTES_LIMIT = 50000;
+
+function updateNotesURL(value) {
+  if (value.length > 8192 || /[\s\u0000-\u001f\u007f]/.test(value)) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
+}
+
+function updateNotesLinkEnd(text, start) {
+  let depth = 0;
+  for (let i = start; i < Math.min(text.length, start + 8193); i++) {
+    if (text[i] === "(") depth += 1;
+    if (text[i] === ")") { if (!depth) return i; depth -= 1; }
+  }
+  return -1;
+}
+
+function updateNotesInline(text, budget, depth = 0, links = true) {
+  const html = [], tokens = /`+|!\[|\[|https:\/\/|\*{1,2}|_{1,2}/g;
+  let copied = 0, match;
+  const append = (start, end, markup) => {
+    html.push(esc(text.slice(copied, start)), markup);
+    copied = end; tokens.lastIndex = end;
+  };
+  // A shared attempt budget also bounds unmatched delimiters and nested labels.
+  while (budget.inline > 0 && (match = tokens.exec(text))) {
+    budget.inline -= 1;
+    const marker = match[0], start = match.index, body = start + marker.length;
+    if (marker[0] === "`") {
+      const end = text.indexOf(marker, body);
+      if (end > body) append(start, end + marker.length, `<code>${esc(text.slice(body, end))}</code>`);
+    } else if (marker === "[" || marker === "![") {
+      const labelEnd = text.indexOf("](", body);
+      if (labelEnd < body) continue;
+      const end = updateNotesLinkEnd(text, labelEnd + 2);
+      if (end < 0) continue;
+      const label = text.slice(body, labelEnd), url = updateNotesURL(text.slice(labelEnd + 2, end));
+      const markup = marker === "[" && links && label && !label.includes("[") && url
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${updateNotesInline(label, budget, depth + 1, false)}</a>`
+        : esc(text.slice(start, end + 1));
+      append(start, end + 1, markup);
+    } else if (marker === "https://") {
+      if (!links || start && !/[\s(]/.test(text[start - 1])) continue;
+      let end = body;
+      while (end < text.length && !/[\s<>"'`]/.test(text[end])) end += 1;
+      let value = text.slice(start, end).replace(/[.,;:!?]+$/, "");
+      let balance = 0;
+      for (const char of value) { if (char === "(") balance += 1; else if (char === ")") balance -= 1; }
+      while (balance < 0 && value.endsWith(")")) { value = value.slice(0, -1); balance += 1; }
+      const url = updateNotesURL(value);
+      if (url) append(start, start + value.length, `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(value)}</a>`);
+      else append(start, end, esc(text.slice(start, end)));
+    } else if (depth < 2 && /\S/.test(text[body] || "") && !(marker.length === 1 && /[\w*_]/.test(text[start - 1] || ""))) {
+      const end = text.indexOf(marker, body);
+      if (end > body && /\S/.test(text[end - 1]) && !(marker.length === 1 && /[\w*_]/.test(text[end + 1] || ""))) {
+        const tag = marker.length === 2 ? "strong" : "em";
+        append(start, end + marker.length, `<${tag}>${updateNotesInline(text.slice(body, end), budget, depth + 1, links)}</${tag}>`);
+      }
+    }
+  }
+  html.push(esc(text.slice(copied)));
+  return html.join("");
+}
+
+function updateNotesCells(line) {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+}
+
+function renderReleaseNotes(markdown) {
+  if (typeof markdown !== "string") return "";
+  const bounded = markdown.slice(0, UPDATE_NOTES_LIMIT);
+  if (!bounded.trim()) return "";
+  const lines = bounded.replace(/\r\n?/g, "\n").replace(/\u0000/g, "\ufffd").split("\n");
+  const html = [], budget = {inline: 1500, cells: 2000};
+  const inline = text => updateNotesInline(text, budget);
+  let paragraph = [], list = null;
+  const endParagraph = () => { if (paragraph.length) html.push(`<p>${inline(paragraph.join(" "))}</p>`); paragraph = []; };
+  const endList = () => {
+    if (list) html.push(`<${list.tag}>${list.items.map(item => `<li>${inline(item)}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+  const endBlocks = () => { endParagraph(); endList(); };
+  const tableLine = line => /^\s*\|.*\|\s*$/.test(line);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], fence = /^ {0,3}(`{3,}|~{3,})[^\n]*$/.exec(line);
+    if (fence) {
+      endBlocks();
+      const code = [], closing = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`);
+      for (i++; i < lines.length && !closing.test(lines[i]); i++) code.push(lines[i]);
+      html.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (!line.trim()) { endBlocks(); continue; }
+    const heading = /^ {0,3}(#{1,6})[ \t]+(.+)$/.exec(line);
+    if (heading) {
+      endBlocks();
+      const level = Math.min(6, heading[1].length + 2);
+      let label = heading[2].trimEnd(), end = label.length;
+      while (end && label[end - 1] === "#") end -= 1;
+      if (end && /\s/.test(label[end - 1])) label = label.slice(0, end).trimEnd();
+      html.push(`<h${level}>${inline(label)}</h${level}>`);
+      continue;
+    }
+    if (/^ {0,3}([-*_])(?:[ \t]*\1){2,}\s*$/.test(line)) { endBlocks(); html.push("<hr>"); continue; }
+    if (tableLine(line) && tableLine(lines[i + 1] || "")) {
+      const head = updateNotesCells(line), separator = updateNotesCells(lines[i + 1]);
+      if (head.length <= 20 && head.length <= budget.cells && head.length === separator.length && separator.every(cell => /^:?-{2,}:?$/.test(cell))) {
+        endBlocks();
+        const rows = []; budget.cells -= head.length;
+        for (i += 2; i < lines.length && tableLine(lines[i]); i++) {
+          const cells = updateNotesCells(lines[i]);
+          if (cells.length !== head.length || head.length > budget.cells) break;
+          budget.cells -= head.length; rows.push(cells);
+        }
+        i--;
+        html.push(`<table><thead><tr>${head.map(cell => `<th scope="col">${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        continue;
+      }
+    }
+    const item = /^\s*(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      endParagraph();
+      const tag = item[1] ? "ul" : "ol";
+      if (!list || list.tag !== tag) { endList(); list = {tag, items: []}; }
+      list.items.push(item[3]); continue;
+    }
+    if (list && /^\s+\S/.test(line)) { list.items[list.items.length - 1] += " " + line.trim(); continue; }
+    endList(); paragraph.push(line.trim());
+  }
+  endBlocks();
+  return html.join("\n");
+}
+
+
 function updateURL(data) {
   return data?.available && /^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/.test(data.latest || "")
     ? `https://github.com/cyberdeliaAI/ibfetch/releases/tag/v${data.latest}` : "https://github.com/cyberdeliaAI/ibfetch/releases/latest";
 }
 function renderUpdates(data) {
   if (!data) return;
-  const available = data.available && updateURL(data).includes("/tag/");
+  releaseData = data;
+  const available = data.available && updateURL(data).includes("/tag/")
+    && (desktopUpdate.explicit || desktopUpdate.data?.skipped !== data.latest);
   $("currentVersion").textContent = data.current;
   $("updateBtn").textContent = available ? `Update available · ${data.latest}` : `ibfetch ${data.current}`;
   $("updateBtn").className = available ? "quiet available" : "quiet";
@@ -3737,6 +4040,9 @@ function renderUpdates(data) {
     available ? `Version ${data.latest} is available. You are running ${data.current}.` :
     data.latest ? `You are running ${data.current}. Latest stable release: ${data.latest}.` :
     data.automatic ? "Updates are checked automatically, at most once a day." : "Automatic checks are off. You can still check manually.";
+  $("updateDetails").hidden = !data.available;
+  offerDesktopUpdate(data);
+  if ($("updateDialog").open) refreshUpdateDialog();
 }
 function setUpdatePanel(open, focus = false) {
   $("updatePanel").hidden = !open;
@@ -3745,9 +4051,13 @@ function setUpdatePanel(open, focus = false) {
   if (focus) $("updateBtn").focus();
 }
 async function checkUpdates() {
+  desktopUpdate.explicit = true; desktopUpdate.manualWaiting = true;
   $("checkUpdates").disabled = true;
   try { const data = await api("/api/updates/check", {}); if (S) S.updates = data; renderUpdates(data); }
-  catch (error) { notice("Could not check for updates. Try again later.", true); }
+  catch (error) {
+    desktopUpdate.manualWaiting = false; desktopUpdate.manualCheckedAt = releaseData?.checked_at ?? null;
+    notice("Could not check for updates. Try again later.", true);
+  }
   finally { $("checkUpdates").disabled = !!S?.updates?.checking; }
 }
 async function saveUpdatePreference() {
@@ -3816,6 +4126,7 @@ async function openSignInChild(login, serial, reserved = null) {
   renderLogin();
 }
 async function beginSignIn() {
+  if (signingOut) return;
   if (signInFlow.opening) return;
   const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
   closeSignInChild(); signInFlow.requestId = ""; signInFlow.popup = reserved;
@@ -3872,8 +4183,8 @@ function renderLogin() {
   }
   $("signinIdle").hidden = !!(waiting || starting);
   $("signinWait").hidden = !(waiting || starting);
-  $("signinBtn").disabled = !!starting;
-  $("signinOpen").disabled = !!starting;
+  $("signinBtn").disabled = !!starting || signingOut;
+  $("signinOpen").disabled = !!starting || signingOut;
   $("signinFallback").hidden = !waiting;
   $("signinError").hidden = login?.state !== "error";
   if (login?.state === "error") $("signinError").textContent = login.message;
@@ -3893,6 +4204,25 @@ if (typeof window.ibfetchSignIn?.onClosed === "function") window.ibfetchSignIn.o
     $("signinFallback").open = true; renderLogin();
   } else cancelSignIn();
 });
+
+async function signOut() {
+  if (signingOut || !confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
+  signingOut = true;
+  try {
+    await api("/api/logout", {});
+    if (stopped) return;
+    loginRevision++; statePollSerial++;
+    ++signInFlow.serial; closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+    S = {...S, signed_in: false, session: null, user: null, login: null, transfer: null, can_retry: false,
+      library: {state: "none", version: 0, counts: null, error: ""}};
+    sessionVersion = null;
+    resetLibraryView(); render();
+    if (typeof window.ibfetchSignIn?.reset === "function" && !await window.ibfetchSignIn.reset()) {
+      notice("The sign-in window could not be reset. Choose Switch User on iBroadcast's sign-in page when connecting another account.", true);
+    }
+  } catch (error) { notice(error.message, true); }
+  finally { signingOut = false; if (!stopped) { renderLogin(); poll(); } }
+}
 
 /* library index */
 async function loadMeta(version) {
@@ -3929,7 +4259,7 @@ function letterOf(name) {
   let f = fold(name);
   if ($("fSkipThe").checked && f.startsWith("the ")) f = f.slice(4);
   const c = f.charAt(0).toUpperCase();
-  return c >= "A" && c <= "Z" ? c : "#";
+  return /^[A-Z]$/.test(c) ? c : "#";
 }
 
 function renderLetters() {
@@ -3945,9 +4275,9 @@ function renderArtists() {
   else if (letter !== "All") list = list.filter((a) => letterOf(a[0]) === letter);
   const cap = 500;
   let html = "";
-  if (!q && letter !== "All" && letter !== "#" && list.length) {
+  if (!q && letter !== "All" && list.length) {
     const albums = list.reduce((n, a) => n + a[1], 0);
-    html += `<button type="button" class="artist every" data-pattern="${letter}*" aria-pressed="${activeArtist === letter + "*"}">` +
+    html += `<button type="button" class="artist every" data-initial="${letter}" aria-pressed="${activeInitial === letter}">` +
             `<span class="name">Every artist on ${letter}</span><span class="count">${num(albums)}</span></button>`;
   }
   for (const [name, albums] of list.slice(0, cap)) {
@@ -3962,7 +4292,7 @@ function renderArtists() {
 /* searching */
 function filters() {
   return {
-    artist: $("fArtist").value, album: $("fAlbum").value, track_artist: $("fTrackArtist").value,
+    artist: $("fArtist").value, artist_initial: activeInitial, album: $("fAlbum").value, track_artist: $("fTrackArtist").value,
     year: $("fYear").value, genre: $("fGenre").value, format: $("fFormat").value, tag: $("fTag").value,
     playlist: $("fPlaylist").value, skip_the: $("fSkipThe").checked,
   };
@@ -3971,7 +4301,7 @@ function filters() {
 async function search() {
   const generation = ++searchGeneration;
   const f = filters();
-  const any = ["artist", "album", "track_artist", "year", "genre", "format", "tag", "playlist"].some((k) => String(f[k]).trim());
+  const any = ["artist_initial", "artist", "album", "track_artist", "year", "genre", "format", "tag", "playlist"].some((k) => String(f[k] || "").trim());
   if (!any) { notice("Pick an artist or fill in a field first."); return; }
   if (!S || S.library.state !== "ready") { notice("The library is still loading."); return; }
   $("resultInfo").textContent = "Searching";
@@ -3979,6 +4309,7 @@ async function search() {
     const r = await api("/api/select", f);
     if (generation !== searchGeneration) return;
     results = r.albums;
+    orderResults();
   } catch (e) {
     if (generation !== searchGeneration) return;
     results = [];
@@ -4002,6 +4333,28 @@ function renderResultsEmpty(message) {
   $("addSelBtn").disabled = $("addAllBtn").disabled = true;
 }
 
+const RESULT_COLLATOR = new Intl.Collator(undefined, {numeric: true, sensitivity: "base"});
+const SORT_COLUMNS = [["artist", "Artist"], ["title", "Album"], ["year", "Year"],
+  ["tracks", "Tracks"], ["formats", "Format"], ["length", "Length"]];
+function orderResults() {
+  if (!sortColumn) return;
+  const compareText = (a, b) => RESULT_COLLATOR.compare(String(a || ""), String(b || ""));
+  results.sort((a, b) => {
+    const value = item => sortColumn === "tracks" ? item.tracks.length : item[sortColumn];
+    const primary = ["year", "tracks", "length"].includes(sortColumn)
+      ? (Number(value(a)) || 0) - (Number(value(b)) || 0) : compareText(value(a), value(b));
+    return primary * sortDirection || compareText(a.artist, b.artist) || compareText(a.title, b.title)
+      || (a.disc || 0) - (b.disc || 0) || a.id - b.id;
+  });
+}
+function sortResults(column) {
+  if (!SORT_COLUMNS.some(([key]) => key === column)) return;
+  sortDirection = sortColumn === column ? -sortDirection : 1;
+  sortColumn = column;
+  orderResults(); lastClick = -1; expanded.clear(); renderResults();
+  $("results").querySelector(`button[data-sort="${column}"]`)?.focus();
+}
+
 function renderResults() {
   if (!results.length) {
     renderResultsEmpty("No albums match. Check the spelling, or use * for any text, like *floyd*.");
@@ -4009,7 +4362,8 @@ function renderResults() {
     return;
   }
   const head = `<div class="grid-row head" role="row"><div class="c-chk"><input type="checkbox" id="allBox" aria-label="Select all albums"></div>` +
-    `<div>Artist</div><div>Album</div><div class="num">Year</div><div class="num">Tracks</div><div>Format</div><div class="num">Length</div></div>`;
+    SORT_COLUMNS.map(([key, label]) => `<div role="columnheader" aria-sort="${sortColumn === key ? (sortDirection === 1 ? "ascending" : "descending") : "none"}"${["year", "tracks", "length"].includes(key) ? ' class="num"' : ""}>` +
+      `<button type="button" class="sort" data-sort="${key}" title="Sort by ${label.toLowerCase()}">${label}${sortColumn === key ? (sortDirection === 1 ? " ↑" : " ↓") : ""}</button></div>`).join("") + `</div>`;
   const rows = results.map((a, i) => rowHtml(a, i)).join("");
   $("results").innerHTML = head + rows;
   $("results").scrollTop = 0;
@@ -4219,7 +4573,21 @@ function renderTransfer() {
 }
 
 /* events */
-$("updateBtn").addEventListener("click", () => setUpdatePanel($("updatePanel").hidden));
+$("updateBtn").addEventListener("click", () => {
+  if (releaseData?.available && (desktopUpdate.explicit || desktopUpdate.data?.skipped !== releaseData.latest)) openUpdateDialog();
+  else setUpdatePanel($("updatePanel").hidden);
+});
+$("updateDetails").addEventListener("click", openUpdateDialog);
+$("updateLater").addEventListener("click", closeUpdateDialog);
+$("updateDialog").addEventListener("close", () => $("updateBtn").focus());
+$("desktopDownload").addEventListener("click", () => nativeUpdateAction("download"));
+$("desktopInstall").addEventListener("click", () => nativeUpdateAction("install"));
+$("desktopSkip").addEventListener("click", () => nativeUpdateAction("skip"));
+$("desktopAuto").addEventListener("change", () => nativeUpdateAction("configure", $("desktopAuto").checked));
+if (typeof window.ibfetchUpdates?.onStatus === "function") {
+  window.ibfetchUpdates.onStatus(applyDesktopUpdate);
+  window.ibfetchUpdates.status().then(applyDesktopUpdate).catch(() => {});
+}
 $("checkUpdates").addEventListener("click", checkUpdates);
 $("autoUpdates").addEventListener("change", saveUpdatePreference);
 $("themeBtn").addEventListener("click", () => setThemeMenu($("themeMenu").hidden));
@@ -4245,14 +4613,7 @@ if (typeof window !== "undefined") window.addEventListener("beforeunload", e => 
 $("signinBtn").addEventListener("click", beginSignIn);
 $("signinOpen").addEventListener("click", reopenSignIn);
 $("signinCancel").addEventListener("click", cancelSignIn);
-$("signoutBtn").addEventListener("click", async () => {
-  if (!confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
-  try {
-    await api("/api/logout", {});
-    queue.clear(); results = []; meta = null; metaVersion = 0;
-    renderQueue(); poll();
-  } catch (e) { notice(e.message, true); }
-});
+$("signoutBtn").addEventListener("click", signOut);
 $("refreshBtn").addEventListener("click", async () => {
   try { await api("/api/library", { refresh: true }); notice("Fetching the library index again."); poll(); } catch (e) { notice(e.message, true); }
 });
@@ -4277,10 +4638,15 @@ $("artistFind").addEventListener("input", renderArtists);
 $("artistList").addEventListener("click", (e) => {
   const b = e.target.closest("button.artist");
   if (!b) return;
-  activeArtist = b.dataset.pattern || b.dataset.name;
-  $("fArtist").value = activeArtist;
+  activeInitial = b.dataset.initial || null;
+  activeArtist = activeInitial ? null : b.dataset.name;
+  $("fArtist").value = activeArtist || "";
+  $("fArtist").placeholder = activeInitial ? `Every artist on ${activeInitial}` : "4hero or A*";
   renderArtists();
   search();
+});
+$("fArtist").addEventListener("input", () => {
+  activeInitial = null; $("fArtist").placeholder = "4hero or A*";
 });
 $("fSkipThe").addEventListener("change", renderArtists);
 $("filters").addEventListener("submit", (e) => { e.preventDefault(); activeArtist = $("fArtist").value; renderArtists(); search(); });
@@ -4288,7 +4654,7 @@ $("clearBtn").addEventListener("click", () => {
   searchGeneration++;
   for (const id of ["fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
   for (const id of ["fFormat", "fTag", "fPlaylist"]) $(id).value = "";
-  activeArtist = null;
+  activeArtist = null; activeInitial = null; $("fArtist").placeholder = "4hero or A*";
   results = []; checked.clear();
   renderArtists();
   renderResultsEmpty();
@@ -4296,6 +4662,8 @@ $("clearBtn").addEventListener("click", () => {
 });
 
 $("results").addEventListener("click", (e) => {
+  const sort = e.target.closest("button[data-sort]");
+  if (sort) { sortResults(sort.dataset.sort); return; }
   if (e.target.id === "allBox") {
     const on = e.target.checked;
     checked = on ? new Set(results.map((a) => a.id)) : new Set();

@@ -1,7 +1,7 @@
 {
   "name": "ibfetch-desktop",
   "productName": "ibfetch",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Download selected iBroadcast music in a standalone desktop window.",
   "author": "Cyberdelia",
   "license": "MIT",
@@ -29,6 +29,14 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "update-config.json",
+        "to": "app-update.yml"
+      },
+      {
+        "from": "../build/update-capabilities.json",
+        "to": "update-capabilities.json"
+      },
       {
         "from": "../build/backend/ibfetch-server",
         "to": "backend"
@@ -71,5 +79,8 @@
   },
   "overrides": {
     "minimatch@>=7.0.0 <11.0.1": "11.0.1"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.12"
   }
 }

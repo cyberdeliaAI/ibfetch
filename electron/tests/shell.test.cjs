@@ -49,7 +49,7 @@ test("packaged applications always use the bundled backend", () => {
   assert.deepEqual(command.args,["--desktop-host"]);
 });
 
-test("the shell exposes only sign-in operations with no Node access or webviews", () => {
+test("the shell exposes narrow sign-in/update operations with no Node access or webviews", () => {
   const source=fs.readFileSync(path.join(__dirname,"../main.cjs"),"utf8");
   for(const setting of ["nodeIntegration: false", "contextIsolation: true", "sandbox: true", "webSecurity: true", "webviewTag: false"])
     assert.ok(source.includes(setting));
@@ -74,7 +74,7 @@ test("a real source backend starts with a temporary home and exits on parent EOF
     assert.ok((await page.text()).includes("<title>ibfetch</title>"));
     assert.ok(!page.headers.get("content-security-policy").includes("script-src 'unsafe-inline'"));
   } finally {
-    await backend.stop();
+    assert.deepEqual(await backend.stop(),{code:0,signal:null,forced:false});
     fs.rmSync(home,{recursive:true,force:true});
   }
 });
@@ -95,7 +95,9 @@ test("closing terminates only its owned backend when a worker is stuck in a sock
     const started=Date.now();
     const stopped=backend.stop();
     assert.equal(backend.stop(),stopped);
-    await stopped;
+    const result=await stopped;
+    assert.equal(result.forced,true);
+    assert.ok(result.code!==0 || result.signal!==null);
     assert.ok(Date.now()-started<5000,"shutdown must not wait for a network timeout");
     assert.ok(backend.child.exitCode!==null || backend.child.signalCode!==null);
     assert.equal(process.kill(process.pid,0),true,"the parent remains alive");

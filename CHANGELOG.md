@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.7.0
+
+- Add Tagcast-style release notes, update progress, Later/Skip controls and optional automatic downloads, disabled by default.
+- Enable confirmed in-app installation of future updates for signed Mac release copies; keep Homebrew and portable platforms on their own upgrade routes.
+- Verify update package checksums, restrict installer feeds to official release files and require clean backend shutdown before installation; never install on ordinary Quit.
+
+- Clear account-specific results, selections and filters immediately on sign-out or account change; reject library loads without an account ID.
+- Reset only the desktop provider window's own stored sign-in after confirmed sign-out, with isolation and pending-login guards.
+- Add whole-group selection for # artists, including names beyond the sidebar display limit.
+- Sort album results by any column in either direction while retaining selected albums and the download list.
+- Document an album-first layout for compilation downloads and the browser's Switch User option.
+
 ## 1.6.0
 
 - Ship Developer ID signed and Apple-notarized Mac downloads for Apple Silicon and Intel.

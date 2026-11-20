@@ -88,7 +88,7 @@ def check_app(executable, version):
                  else executable.parent / "resources")
     for relative in ("LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/Electron.txt",
                      "licenses/LICENSES.chromium.html", "licenses/PyInstaller.txt", "licenses/Python-3.13.txt",
-                     "licenses/certifi.txt"):
+                     "licenses/certifi.txt", "licenses/npm/packages.json", "app-update.yml", "update-capabilities.json"):
         if not (resources / relative).is_file():
             raise RuntimeError("Missing bundled license: " + relative)
     bundle = resources / "backend/_internal/certificates/cacert.pem"
@@ -107,7 +107,7 @@ def check_app(executable, version):
         expected_electron = json.loads((ROOT / "electron/package.json").read_text())["devDependencies"]["electron"]
         if (not result.get("ok") or result.get("version") != version or not result.get("isolated")
                 or result.get("electron") != expected_electron
-                or result.get("palette") != "ocean" or result.get("theme") != "dark"):
+                or result.get("palette") != "ocean" or result.get("theme") != "dark" or not result.get("updates", {}).get("ok")):
             raise RuntimeError("Desktop smoke check failed")
         print("Standalone window and isolated renderer verified.")
 
@@ -123,6 +123,9 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     version = json.loads((ROOT / "electron/package.json").read_text())["version"]
+    (ROOT / "build").mkdir(exist_ok=True)
+    (ROOT / "build/update-capabilities.json").write_text(json.dumps({"protocol": 1,
+        "developerId": args.sign_macos}), encoding="utf-8")
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     node = shutil.which("node")
     if not npm or not node:
@@ -157,6 +160,8 @@ def main():
     for name in ("LICENSE", "LICENSES.chromium.html"):
         shutil.copy2(ROOT / "electron/node_modules/electron/dist" / name,
                      licenses / ("Electron.txt" if name == "LICENSE" else name))
+    from updater_licenses import collect_updater_licenses
+    collect_updater_licenses(ROOT, licenses / "npm")
     command = [npm, "run", "pack"]
     if args.sign_macos:
         command += ["--", "--config", str(ROOT / "tools/electron_signed.cjs")]

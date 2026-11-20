@@ -23,7 +23,7 @@ async function check({app,window,signIn}) {
     if(restart) {
       const area=screen.getPrimaryDisplay().workArea, bounds=window.getBounds();
       assert.equal(bounds.width,Math.min(1100,area.width));assert.equal(bounds.height,Math.min(760,area.height));
-      await run('(async()=>{await api("/api/logout",{});await poll();})()');
+      await run('(async()=>{confirm=()=>true;await signOut();await poll();})()');
     }
     stage="open";await run("beginSignIn()");await until(()=>Boolean(signIn.window));
     let view=signIn.window;await until(()=>!view.webContents.isLoading());
@@ -31,6 +31,7 @@ async function check({app,window,signIn}) {
     assert.equal(prefs.preload,undefined);assert.equal(prefs.nodeIntegration,false);
     assert.equal(prefs.sandbox,true);assert.equal(prefs.contextIsolation,true);
     assert.equal(await view.webContents.executeJavaScript('typeof window.ibfetchSignIn'),"undefined");
+    assert.equal(await view.webContents.executeJavaScript('typeof window.ibfetchUpdates'),"undefined");
     assert.equal(new URL(view.webContents.getURL()).origin,"https://oauth.ibroadcast.com");
     if(restart) {
       const area=screen.getDisplayMatching(window.getBounds()).workArea;
@@ -55,6 +56,51 @@ async function check({app,window,signIn}) {
     await fetch(base+"/_signin/outcome",{method:"POST",body:JSON.stringify("approve")});
     await until(()=>run('S.signed_in && S.library.state === "ready"'));
     assert.equal(signIn.window,null);
+    stage="group-and-sort";
+    await until(()=>run('Boolean(meta?.artists?.length)'));
+    await run(`document.querySelector('#letters [data-letter="#"]').click();document.querySelector('#artistList [data-initial="#"]').click();`);
+    await until(()=>run('results.length===2'));
+    assert.deepEqual(await run('results.map(a=>a.artist).sort()'),["(First compilation)","10 First"]);
+    await run(`document.querySelector('#results [data-sort="title"]').click()`);
+    assert.deepEqual(await run('results.map(a=>a.title)'),["Apple compilation","Zed compilation"]);
+    await run('document.querySelector(".row input").click()');
+    const selected=await run('[...checked][0]');
+    await run(`document.querySelector('#results [data-sort="title"]').click()`);
+    assert.deepEqual(await run('[...checked]'),[selected]);
+    assert.equal(await run(`document.querySelector('[aria-sort="descending"] button').dataset.sort`),"title");
+    await run('document.getElementById("addAllBtn").click()');
+    assert.equal(await run('queue.size'),2);
+    if(process.env.IBFETCH_SIGN_IN_SCREENSHOT) {
+      await sleep(250);
+      fs.writeFileSync(process.env.IBFETCH_SIGN_IN_SCREENSHOT,(await window.webContents.capturePage()).toPNG());
+      window.setSize(760,850);
+      await run('document.documentElement.dataset.appearance="light";document.documentElement.dataset.palette="amber";showTheme()');
+      await sleep(250);
+      const light=path.join(path.dirname(process.env.IBFETCH_SIGN_IN_SCREENSHOT),path.basename(process.env.IBFETCH_SIGN_IN_SCREENSHOT,".png")+"-light.png");
+      fs.writeFileSync(light,(await window.webContents.capturePage()).toPNG());
+      window.setSize(1320,850);
+      await run('document.documentElement.dataset.appearance="dark";document.documentElement.dataset.palette="forest";showTheme()');
+    }
+    stage="account-switch";
+    const providerSession=session.fromPartition(SIGN_IN_PARTITION), mainSession=window.webContents.session;
+    await providerSession.cookies.set({url:"https://oauth.ibroadcast.com",name:"synthetic-account-cookie",value:"first"});
+    await mainSession.cookies.set({url:new URL(window.webContents.getURL()).origin,name:"synthetic-main-cookie",value:"keep"});
+    await run('confirm=()=>true;signOut()');
+    assert.equal(await run('S.signed_in'),false);
+    assert.equal(await run('queue.size+results.length'),0);
+    assert.deepEqual(await providerSession.cookies.get({name:"synthetic-account-cookie"}),[]);
+    assert.equal((await mainSession.cookies.get({name:"synthetic-main-cookie"})).length,1);
+    assert.equal(await run('document.getElementById("fArtist").value'),"");
+    assert.equal(await run('document.getElementById("results").textContent.includes("compilation")'),false);
+    await fetch(base+"/_signin/account",{method:"POST",body:JSON.stringify("second")});
+    await run('beginSignIn()');await until(()=>Boolean(signIn.window));
+    await fetch(base+"/_signin/outcome",{method:"POST",body:JSON.stringify("approve")});
+    await until(()=>run('S.user?.name==="second account" && S.library.state==="ready" && meta?.artists?.[0]?.[0]==="# Second account"'));
+    await run(`document.querySelector('#letters [data-letter="#"]').click();document.querySelector('#artistList [data-initial="#"]').click();`);
+    await until(()=>run('results.length===1 && results[0].title==="Second account album"'));
+    assert.equal(await run('queue.size'),0);
+    const folder=await run('document.getElementById("outDir").value');
+    assert.ok(folder.length>0);
     stage="layouts";const layouts=[];
     for(const width of [420,760,1320]) {
       window.setSize(width,850);await sleep(120);
@@ -63,7 +109,8 @@ async function check({app,window,signIn}) {
     }
     window.setSize(1100,760);await sleep(350);
     done({ok:true,phase:"initial",windowSizesSaved:true,providerWindow:true,noRemoteBridge:true,sandbox:true,cancelled:true,deniedAndRetried:true,
-      browserFallback:true,approvedAndReturned:true,layouts});
+      browserFallback:true,approvedAndReturned:true,twoAccounts:true,providerCookiesCleared:true,mainCookiesPreserved:true,
+      hashArtistGroup:true,albumSorting:true,selectionPreserved:true,layouts});
   } catch(error) {done({ok:false,stage,error:error.message});}
   finally {if(intercepted)session.fromPartition(SIGN_IN_PARTITION).protocol.unhandle("https");}
 }

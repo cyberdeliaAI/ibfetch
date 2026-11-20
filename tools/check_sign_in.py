@@ -17,8 +17,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", type=Path, help="Packaged executable; defaults to source Electron")
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--screenshot", type=Path, help="Optional synthetic UI capture, never a real account")
     args = parser.parse_args()
-    outcome = {"value": "pending", "starts": 0}
+    outcome = {"value": "pending", "starts": 0, "account": "first"}
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -43,6 +44,12 @@ def main():
 
         def do_POST(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            if self.path == "/_signin/account":
+                account = json.loads(raw)
+                if account not in ("first", "second"):
+                    return self.send({}, 400)
+                outcome["account"] = account
+                return self.send({"ok": True})
             if self.path == "/_signin/outcome":
                 outcome["value"] = json.loads(raw)
                 return self.send({"ok": True})
@@ -51,12 +58,22 @@ def main():
                 if body.get("grant_type") == ["device_code"] and outcome["value"] != "approve":
                     return self.send({"error": "access_denied" if outcome["value"] == "deny"
                                       else "authorization_pending"}, 400)
-                return self.send({"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "expires_in": 3600})
+                return self.send({"access_token": "synthetic-access-" + outcome["account"], "refresh_token": "synthetic-refresh", "expires_in": 3600})
+            if self.path == "/oauth/revoke":
+                return self.send({"result": True})
+            account = "second" if self.headers.get("Authorization") == "Bearer synthetic-access-second" else "first"
             if self.path == "/api/status":
-                return self.send({"user": {"id": "synthetic-account", "username": "Demo account", "premium": True},
+                return self.send({"user": {"id": "synthetic-" + account, "username": account + " account", "premium": True},
                                   "status": {"lastmodified": "synthetic-revision"}})
             if self.path == "/library":
-                return self.send({"artists": {}, "albums": {}, "tracks": {}})
+                names = [("# Second account", "Second account album")] if account == "second" else [
+                    ("10 First", "Zed compilation"), ("(First compilation)", "Apple compilation"), ("Zulu First", "Normal album")]
+                return self.send({
+                    "artists": {str(i): {"name": artist} for i, (artist, _album) in enumerate(names, 1)},
+                    "albums": {str(i): {"name": album, "artist_id": i, "tracks": [i]} for i, (_artist, album) in enumerate(names, 1)},
+                    "tracks": {str(i): {"title": "Synthetic track " + str(i), "album_id": i, "artist_id": i,
+                                         "track": 1, "length": 60, "type": "audio/flac", "file": "/synthetic/" + str(i)}
+                               for i in range(1, len(names) + 1)}})
             self.send({}, 404)
 
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
@@ -74,6 +91,10 @@ def main():
             env.update(IBFETCH_HOME=str(home), IBFETCH_ELECTRON_PROFILE=str(home / "profile"),
                        IBFETCH_PYTHON=sys.executable, IBFETCH_BASE="http://127.0.0.1:" + str(provider.server_port),
                        IBFETCH_SIGN_IN_SMOKE_REPORT=str(args.report), IBROADCAST_CLIENT_ID="synthetic-client")
+            if args.screenshot:
+                args.screenshot = args.screenshot.resolve()
+                args.screenshot.parent.mkdir(parents=True, exist_ok=True)
+                env["IBFETCH_SIGN_IN_SCREENSHOT"] = str(args.screenshot)
             command = ([str(args.app.resolve())] if args.app else
                        [str(ROOT / "electron/node_modules/.bin/electron"), str(ROOT / "electron")])
             phases = []
@@ -95,7 +116,7 @@ def main():
                     raise RuntimeError("Synthetic sign-in was not persisted")
                 phases.append(result)
             args.report.write_text(json.dumps({"ok": True, "phases": phases}, indent=2) + "\n")
-            print("Verified isolated sign-in, approval, cancellation, fallback and size restoration after restart.")
+            print("Verified isolated sign-in, two-account switching, provider reset, group selection, sorting and size restoration.")
     finally:
         provider.shutdown()
         provider.server_close()

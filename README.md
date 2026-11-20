@@ -22,11 +22,24 @@ Powered by iBroadcast logos are used unchanged under its [branding guidelines](h
 
 ## Updates
 
-The app checks GitHub for a new stable release at startup and while open, at most
-once a day. A newer version appears as **Update available** in the header. Click
-it for the release page and downloads. The version button also offers a manual
-check and an option to turn automatic checks off. No account or library data is sent.
-Installation is manual; stop ibfetch before replacing the app or upgrading with Homebrew.
+ibfetch checks anonymously for a new stable GitHub release once a day. Choose the
+version button in the header to check manually or turn these checks off. When an
+update is available, open it to read the release notes, choose **Later**,
+or visit the official release page. Supported Mac copies also offer
+**Skip this version**.
+
+Starting with 1.7.0, the signed Mac app installed from a release ZIP can also
+**Download update**, show progress, then **Restart and install** after your
+confirmation. Automatic downloading is optional and off by default; ordinary Quit
+never installs an update. Finish or stop downloads and empty the download list
+before installing. Saved sign-in, settings and music are retained.
+
+Homebrew installations use `brew upgrade --cask cyberdeliaAI/apps/ibfetch` (or
+`--formula` for Python). The portable Windows/Linux and Python/browser versions
+show the release notes and download link; replace their files manually after
+closing the old copy. To move from 1.6.0 to this first updater-enabled Mac version,
+install the new release manually once. See [desktop updates](docs/desktop-updates.md)
+for platform support and verification limits.
 
 ## File metadata
 
@@ -72,20 +85,20 @@ JSON manifest records download identity and integrity; it never writes tags or a
 Get the current downloads from [Releases](https://github.com/cyberdeliaAI/ibfetch/releases/latest).
 The desktop apps include Python; you do not need Python, Node.js or npm installed.
 
-| System | Download for 1.6.0 | Open after extracting |
+| System | Download for 1.7.0 | Open after extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-macos-arm64.zip) | `ibfetch.app` |
-| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-macos-x64.zip) | `ibfetch.app` |
-| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-windows-x64.zip) | `ibfetch.exe` |
-| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
-| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.6.0/ibfetch-1.6.0-python.zip) | See below |
+| macOS 13+, Apple Silicon (M1 or newer) | [macOS arm64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-macos-arm64.zip) | `ibfetch.app` |
+| macOS 13+, Intel | [macOS x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-macos-x64.zip) | `ibfetch.app` |
+| Windows 10/11, x64 | [Windows x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-windows-x64.zip) | `ibfetch.exe` |
+| Linux desktop, x64 | [Linux x64 tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-linux-x64.tar.gz) | `ibfetch/ibfetch` |
+| Python/browser or CLI, any supported OS | [Python ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.7.0/ibfetch-1.7.0-python.zip) | See below |
 
 Extract the **whole archive**, then keep all extracted files together. Linux desktop
 builds are tested on Ubuntu 22.04; other distributions may need their normal
 Chromium desktop libraries. Windows ARM and Linux ARM desktop builds are not supplied;
 use Python/browser on those systems.
 
-**macOS:** move `ibfetch.app` to Applications and open it. The 1.6.0 Mac downloads
+**macOS:** move `ibfetch.app` to Applications and open it. The 1.7.0 Mac downloads
 are Developer ID signed and notarized by Apple, with the notarization ticket attached.
 macOS may ask you to confirm opening an app downloaded from the internet.
 Earlier release downloads are unchanged. [Signing details](docs/code-signing.md).
@@ -98,7 +111,7 @@ to run it; organizational policies may prevent unsigned apps.
 **Linux:** extract the tar.gz in your file manager, or run:
 
 ```sh
-tar -xzf ibfetch-1.6.0-linux-x64.tar.gz
+tar -xzf ibfetch-1.7.0-linux-x64.tar.gz
 ./ibfetch/ibfetch
 ```
 
@@ -181,8 +194,8 @@ ibfetch
 Without a command, ibfetch opens its app in your browser. It runs on your own computer only: the page lives at `127.0.0.1` and only the link printed in your terminal opens it. Keep the terminal window open while you use it.
 
 1. Sign in with iBroadcast. The page shows a code and a button to iBroadcast's approval page.
-2. Pick an artist on the left, a letter for every artist on that letter, or search with the fields. `*` matches anything.
-3. Tick albums and add them to the download list, or add all results at once. The arrow before an album shows its tracks. Shift-click selects a range.
+2. Pick an artist on the left, or a letter followed by **Every artist on…** to search the whole group. **#** groups names starting with numbers, punctuation or non-Latin letters. You can also search with the fields; `*` matches anything.
+3. Click **Album** or another column heading to sort the results; click again to reverse the order. Tick albums and add them to the download list, or add all results at once. Sorting keeps the selected albums. The arrow before an album shows its tracks. Shift-click selects a range.
 4. Choose a folder, a quality and how many files at the same time, then press Download.
    For original files, **Original files from** chooses the download service or streaming.
 
@@ -248,6 +261,11 @@ popup. If a popup is blocked or the provider requires your normal browser, choos
 that sign-in attempt; an already approved connection is preserved. iBroadcast's
 remembered website sign-in stays in a separate desktop profile, so the first login
 may still ask for your account details. Passwords stay on iBroadcast.
+
+Explicit **Sign out** clears the desktop sign-in window's own remembered website
+session as well as ibfetch's library/session state. It does not sign you out of
+other browsers or Tagcast. In the browser version, use **Switch User** on the
+iBroadcast approval page if the browser remembers another account.
 
 ```bash
 ibfetch login
@@ -336,6 +354,18 @@ Change it with `--layout`. Fields: `{albumartist}`, `{album}`, `{year}`, `{disc}
 ```bash
 ibfetch get --artist "A*" --layout "{genre}/{albumartist} - {album}/{track} {title}"
 ```
+
+For compilations grouped by album instead of album artist, enter this in the app's
+**Folder and file names** field, or pass it with `--layout`:
+
+```
+{album} ({year})/{disctrack} {artist} - {title}
+```
+
+This gives each album its own folder with the track artist in each filename.
+The **Album** column controls display order; the layout controls folders on disk.
+Albums with identical titles/years can share a folder under this layout, so include
+`{albumartist}` when you want to keep those editions separate.
 
 Characters that aren't allowed in file names on Windows or macOS become `_`, so the same folder works everywhere.
 
