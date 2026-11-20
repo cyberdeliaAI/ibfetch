@@ -69,6 +69,7 @@ class NativeFeedVerificationTests(unittest.TestCase):
         release.prepare_update_feed(self.root, '1.7.0')
         checks = release.verify_release(self.root, '1.7.0')
         self.assertEqual(len(checks), 6)
+        self.assertNotIn(b'\r', (self.root/'latest-mac.yml').read_bytes(), 'Feed bytes and their hash must be identical on Windows/Unix')
         feed = json.loads((self.root/'latest-mac.yml').read_text())
         self.assertEqual(feed['version'], '1.7.0')
         self.assertEqual([f['url'] for f in feed['files']], ['ibfetch-1.7.0-macos-arm64.zip','ibfetch-1.7.0-macos-x64.zip'])

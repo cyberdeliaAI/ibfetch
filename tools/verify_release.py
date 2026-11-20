@@ -66,7 +66,7 @@ def prepare_update_feed(root, version):
     for target, value in ((path, content), (sidecar, checksum)):
         if target.exists() and target.read_text('utf-8') != value:
             raise ValueError('Existing update metadata differs; use a new staging directory.')
-    path.write_text(content, encoding='utf-8')
+    path.write_bytes(content.encode('utf-8'))
     sidecar.write_text(checksum, encoding='ascii')
 
 
