@@ -31,6 +31,7 @@ async function check({app,window,signIn}) {
     assert.equal(prefs.preload,undefined);assert.equal(prefs.nodeIntegration,false);
     assert.equal(prefs.sandbox,true);assert.equal(prefs.contextIsolation,true);
     assert.equal(await view.webContents.executeJavaScript('typeof window.ibfetchSignIn'),"undefined");
+    assert.equal(await view.webContents.executeJavaScript('typeof window.ibfetchUpdates'),"undefined");
     assert.equal(new URL(view.webContents.getURL()).origin,"https://oauth.ibroadcast.com");
     if(restart) {
       const area=screen.getDisplayMatching(window.getBounds()).workArea;

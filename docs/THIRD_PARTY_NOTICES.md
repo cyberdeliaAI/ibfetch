@@ -13,6 +13,10 @@ The standalone desktop downloads include other software under its own terms.
 - **Electron:** MIT. Its license and Chromium/Node dependency notices
   (LICENSES.chromium.html) are copied from the installed Electron distribution
   into resources/licenses for each native build.
+- **electron-updater and its locked runtime dependencies:** MIT and their respective
+  supplied terms. Copies are in resources/licenses/npm, with an inventory of names,
+  versions and declared licenses. The one-file Python/browser version does not use
+  these Node dependencies. The update flow is adapted from Tagcast's MIT-licensed implementation.
 - **certifi / Mozilla CA certificates:** MPL-2.0. Only the trusted root certificate
   data is bundled; the normal Python/browser version still needs no third-party packages.
   The installed certifi license is copied into desktop resources/licenses/certifi.txt.

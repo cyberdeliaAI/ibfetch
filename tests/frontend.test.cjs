@@ -15,7 +15,8 @@ function harness({events = false, appearance = "auto", palette = "forest", dark 
   function node(id) {
     if (!nodes.has(id)) nodes.set(id, {
       value: "", textContent: "", innerHTML: "", hidden: false, disabled: false,
-      checked: false, options: [], style: {}, listeners: {},
+      checked: false, options: [], style: {}, listeners: {}, open: false,
+      showModal() { this.open = true; }, close() { this.open = false; this.listeners.close?.(); },
       setAttribute() {}, querySelector() { return node(`${id}/child`); },
       addEventListener(type, callback) { this.listeners[type] = callback; },
       focus() { this.focused = true; },
@@ -505,4 +506,64 @@ test("browser sign-out discards an old account's in-flight search without a nati
   h.run('finishOldSearch({albums:[{id:1,title:"Old account album"}]});');await search;
   assert.equal(h.run('S.signed_in'),false);assert.equal(h.run('results.length'),0);
   assert.ok(!h.node('results').innerHTML.includes('Old account album'));
+});
+
+test("update details format bounded notes without loading provider HTML or images", () => {
+  const h=harness();
+  const notes='# New release\n\n**Changes** and `code`\n- First\n- Second\n\n| Item | Status |\n| -- | -- |\n| Download | Ready |\n\n<img src="https://evil.invalid/never" onerror="bad()">\n![hidden](https://evil.invalid/image.png)\n[Bad](javascript:bad())\n[User](https://user:pass@example.com/)';
+  const html=h.run(`renderReleaseNotes(${JSON.stringify(notes)})`);
+  assert.match(html,/<h3>New release<\/h3>/);assert.match(html,/<strong>Changes<\/strong>/);
+  assert.match(html,/<code>code<\/code>/);assert.match(html,/<ul>/);assert.match(html,/<table>/);
+  assert.doesNotMatch(html,/<img|<script|href="javascript:|href="https:\/\/user:/);
+  assert.match(html,/&lt;img/);
+  const bounded=h.run('renderReleaseNotes("x".repeat(50000)+"MUST_NOT_APPEAR")');assert.ok(!bounded.includes('MUST_NOT_APPEAR'));
+  assert.equal(h.run('renderReleaseNotes(null)'), '');
+  assert.equal(h.run('renderReleaseNotes("[".repeat(50000))'),'<p>'+'['.repeat(50000)+'</p>');
+});
+
+test("native progress keeps update notes and selections stable and never enables install before download", () => {
+  const h=harness({events:true});
+  h.run(`queue.set(1,{id:1}); checked.add(7); renderUpdates({current:"1.7.0",latest:"1.8.0",available:true,automatic:false,notes:"## Changes\\nSafe text"});
+    applyDesktopUpdate({revision:1,supported:true,version:"1.8.0",state:"available",autoDownload:false});openUpdateDialog();`);
+  assert.equal(h.node('updateDialog').open,true);assert.equal(h.node('desktopDownload').hidden,false);
+  assert.equal(h.node('desktopInstall').hidden,true);
+  const notes=h.node('releaseNotes').innerHTML;h.node('releaseNotes').scrollTop=42;
+  h.run('applyDesktopUpdate({revision:2,supported:true,version:"1.8.0",state:"downloading",progress:47,autoDownload:false});');
+  assert.match(h.node('desktopUpdateStatus').textContent,/47/);assert.equal(h.node('desktopProgress').value,47);
+  assert.equal(h.node('releaseNotes').innerHTML,notes);assert.equal(h.node('releaseNotes').scrollTop,42);
+  h.run('applyDesktopUpdate({revision:1,supported:true,version:"1.8.0",state:"available"});');
+  assert.equal(h.node('desktopProgress').value,47);
+  h.run('applyDesktopUpdate({revision:3,supported:true,version:"1.8.0",state:"ready",autoDownload:false});');
+  assert.equal(h.node('desktopInstall').hidden,false);assert.equal(h.node('desktopInstall').disabled,true);
+  h.run('queue.clear();refreshNativeUpdateControls();');assert.equal(h.node('desktopInstall').disabled,false);
+  assert.equal(h.run('checked.has(7)'),true);
+  h.node('updateLater').listeners.click();assert.equal(h.node('updateDialog').open,false);
+});
+
+test("manual checks do not implicitly allow automatic downloading on following polls", async () => {
+  const offers=[];
+  const h=harness({window:{ibfetchUpdates:{offer:async(version,automatic)=>{offers.push({version,automatic});return {revision:1,supported:false,version};}}}});
+  h.run('S={updates:{current:"1.7.0",latest:"1.8.0",available:true,automatic:true,checking:false,checked_at:1}};api=async()=>({...S.updates,checking:true});');
+  await h.run('checkUpdates()');
+  h.run('renderUpdates({...S.updates,checking:false,checked_at:2});');await new Promise(resolve=>setImmediate(resolve));
+  h.run('renderUpdates({...S.updates,checking:false,checked_at:2});');await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(offers.length>0&&offers.every(o=>!o.automatic));
+  h.run('renderUpdates({...S.updates,checking:false,checked_at:3});');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(offers.at(-1).automatic,true);
+});
+
+test("Homebrew and unsupported copies show manual instructions without installer buttons", () => {
+  const h=harness();h.run('renderUpdates({current:"1.7.0",latest:"1.8.0",available:true,automatic:false});applyDesktopUpdate({revision:1,supported:false,reason:"homebrew",version:"1.8.0"});openUpdateDialog();');
+  assert.match(h.node('desktopUpdateStatus').textContent,/brew upgrade --cask cyberdeliaAI\/apps\/ibfetch/);
+  assert.equal(h.node('desktopInstall').hidden,true);assert.equal(h.node('desktopDownload').hidden,true);
+  assert.equal(h.node('desktopAutoLabel').hidden,true);
+});
+
+test("skip hides a notification until an explicit check while keeping the download list", async () => {
+  const h=harness({window:{ibfetchUpdates:{skip:async version=>({revision:2,supported:true,version,state:'available',skipped:version})}}});
+  h.run('queue.set(1,{id:1});renderUpdates({current:"1.7.0",latest:"1.8.0",available:true,automatic:false});applyDesktopUpdate({revision:1,supported:true,version:"1.8.0",state:"available"});openUpdateDialog();');
+  await h.run('nativeUpdateAction("skip")');
+  assert.equal(h.node('updateDialog').open,false);assert.equal(h.node('updateBtn').textContent,'ibfetch 1.7.0');
+  h.run('desktopUpdate.explicit=true;renderUpdates(releaseData);');assert.match(h.node('updateBtn').textContent,/Update available/);
+  assert.equal(h.run('queue.size'),1);
 });

@@ -160,3 +160,17 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(encoded),
                              (root / "assets" / ("ibroadcast-" + kind + "-compact-powered.svg")).read_bytes())
         self.assertEqual(base64.b64decode(app.IBFETCH_ICON), (root / "assets/ibfetch-icon.svg").read_bytes())
+
+    def test_release_notes_are_bounded_and_restored_from_the_anonymous_cache(self):
+        info = app.release_info({'tag_name':'v9.0.0', 'name':'n'*300, 'body':'x'*60000,
+                                 'html_url':'https://evil.invalid/', 'access_token':'never retained'})
+        self.assertEqual(len(info['name']), 200)
+        self.assertEqual(len(info['notes']), 50000)
+        self.assertNotIn('access_token', info)
+        checker = app.UpdateChecker(self.home)
+        with patch.object(app, 'latest_release', return_value=info):
+            checker.check(manual=True); self.wait(checker)
+        restored = app.UpdateChecker(self.home)
+        self.assertEqual(restored.snapshot()['notes'], 'x'*50000)
+        self.assertEqual(restored.snapshot()['name'], 'n'*200)
+        self.assertEqual(restored.snapshot()['url'], app.RELEASES_URL+'/tag/v9.0.0')

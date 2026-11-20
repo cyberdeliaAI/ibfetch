@@ -6,12 +6,40 @@ const {Backend, backendCommand} = require("./backend.cjs");
 const {applicationUrl, externalUrl} = require("./security.cjs");
 const info = require("./package.json");
 const {windowSize, rememberWindowSize} = require("./window-size.cjs");
-const {installSignIn} = require("./sign-in.cjs");
+const {installSignIn, signInApi} = require("./sign-in.cjs");
+const {DesktopUpdates, installation, installUpdateBridge} = require("./updates.cjs");
 
 app.setName("ibfetch");
 if (process.env.IBFETCH_ELECTRON_PROFILE) app.setPath("userData", path.resolve(process.env.IBFETCH_ELECTRON_PROFILE));
 app.enableSandbox();
-let window, backend, origin, signIn, finished = false, stopping;
+let window, backend, origin, signIn, desktopUpdates, backendAddress, finished = false, stopping;
+let updateShutdownRequested = false;
+
+async function updateCanRestart() {
+  if (stopping || !backend?.child || backend.child.exitCode !== null || backend.child.signalCode !== null
+      || !window || window.isDestroyed()) return false;
+  const state = await signInApi(backendAddress, "/api/state");
+  if (!state || typeof state.signed_in !== "boolean" || !("transfer" in state)) return false;
+  if (state.login || ["ready", "planning", "running"].includes(state.transfer?.state)) return false;
+  const pending = await window.webContents.executeJavaScript("Boolean(queue.size || downloadStarting || signingOut || signInFlow.opening)");
+  return !pending && !stopping && backend.child.exitCode === null && backend.child.signalCode === null;
+}
+
+function finishQuit() {
+  stopping ||= (async () => {
+    const result = await backend?.stop();
+    finished = true;
+    if (updateShutdownRequested && desktopUpdates?.installing) {
+      if (result?.code === 0 && !result.signal && !result.forced) {
+        try { if (desktopUpdates.finish()) return; } catch { /* show a bounded message below */ }
+      }
+      desktopUpdates.defer("install");
+      dialog.showErrorBox("Update ibfetch", "The update could not be installed safely. Start ibfetch again or use the official release download.");
+    }
+    app.quit();
+  })();
+  return stopping;
+}
 
 function openExternal(value) {
   const safe = externalUrl(value);
@@ -49,6 +77,7 @@ function createWindow(url) {
   contents.on("will-redirect", (event, value) => { if (!applicationUrl(value, origin)) event.preventDefault(); });
   contents.on("will-attach-webview", event => event.preventDefault());
   contents.on("will-prevent-unload", event => {
+    if (desktopUpdates?.installing) { desktopUpdates.defer("busy"); updateShutdownRequested = false; }
     const choice = dialog.showMessageBoxSync(window, {type: "question", title: "Close ibfetch?",
       message: "A download or unsent download list is active.",
       detail: "Closing stops downloads and discards the unsent list. Matching partial downloads can be resumed later.",
@@ -63,9 +92,10 @@ function createWindow(url) {
 
 app.on("before-quit", event => {
   if (finished) return;
+  if (desktopUpdates?.installing && !updateShutdownRequested) desktopUpdates.defer();
   event.preventDefault();
   if (window && !window.isDestroyed()) { window.close(); return; }
-  stopping ||= (async () => { await backend?.stop(); finished = true; app.quit(); })();
+  finishQuit();
 });
 app.on("window-all-closed", () => app.quit());
 
@@ -80,13 +110,41 @@ else {
       onExit: () => { window?.destroy(); app.quit(); }});
     const ready = await backend.start();
     if (stopping) return;
-    origin = ready.origin;
+    origin = ready.origin; backendAddress = ready.url;
+    const updateInstallation = installation({packaged: app.isPackaged, platform: process.platform, arch: process.arch,
+      execPath: process.execPath, resourcesPath: process.resourcesPath});
+    desktopUpdates = new DesktopUpdates({...updateInstallation, current: info.version, platform: process.platform, arch: process.arch,
+      file: path.join(app.getPath("userData"), "desktop-updates.json"),
+      createUpdater: () => require("./native-updater.cjs").createNativeUpdater(process.platform),
+      onChange: value => { if (window && !window.isDestroyed()) window.webContents.send("updates:status", value); },
+      onInstallError: () => {
+        finished = true;
+        dialog.showErrorBox("Update ibfetch", "The update could not be installed. Start ibfetch again or use the official release download.");
+        app.quit();
+      },
+      onConfirm: async () => {
+        if (!await updateCanRestart()) {
+          desktopUpdates.defer("busy");
+          if (window && !window.isDestroyed()) await dialog.showMessageBox(window, {type: "info", title: "Update ibfetch",
+            message: "Finish or stop the download and empty the download list before installing the update.", buttons: ["Keep ibfetch open"]});
+          return false;
+        }
+        const choice = await dialog.showMessageBox(window, {type: "question", title: "Update ibfetch",
+          message: "Restart ibfetch and install the downloaded update?", detail: "Your saved settings, sign-in and music are kept.",
+          buttons: ["Later", "Restart and install"], defaultId: 0, cancelId: 0});
+        if (choice.response !== 1) return false;
+        if (!await updateCanRestart()) { desktopUpdates.defer("busy"); return false; }
+        return true;
+      },
+      onInstall: () => { updateShutdownRequested = true; app.quit(); },
+    });
+    installUpdateBridge({ipcMain: require("electron").ipcMain, window: () => window, origin: () => origin, applicationUrl, updates: desktopUpdates});
     Menu.setApplicationMenu(Menu.buildFromTemplate([
       ...(process.platform === "darwin" ? [{label: "ibfetch", submenu: [{role: "about"}, {role: "quit"}]}] : []),
       {role: "editMenu"}, {label: "View", submenu: [{role: "resetZoom"}, {role: "zoomIn"}, {role: "zoomOut"}, {role: "togglefullscreen"}]},
     ]));
     createWindow(ready.url);
     if (process.env.IBFETCH_SIGN_IN_SMOKE_REPORT) require("./sign-in-smoke.cjs").check({app, window, backend, signIn});
-    if (process.env.IBFETCH_SMOKE_REPORT) require("./smoke.cjs").check({app, window, backend});
+    if (process.env.IBFETCH_SMOKE_REPORT) require("./smoke.cjs").check({app, window, backend, desktopUpdates});
   }).catch(() => { dialog.showErrorBox("Could not start ibfetch", "The bundled local server could not start. Restart the app."); app.quit(); });
 }

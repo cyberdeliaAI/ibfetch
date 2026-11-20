@@ -22,11 +22,24 @@ Powered by iBroadcast logos are used unchanged under its [branding guidelines](h
 
 ## Updates
 
-The app checks GitHub for a new stable release at startup and while open, at most
-once a day. A newer version appears as **Update available** in the header. Click
-it for the release page and downloads. The version button also offers a manual
-check and an option to turn automatic checks off. No account or library data is sent.
-Installation is manual; stop ibfetch before replacing the app or upgrading with Homebrew.
+ibfetch checks anonymously for a new stable GitHub release once a day. Choose the
+version button in the header to check manually or turn these checks off. When an
+update is available, open it to read the release notes, choose **Later**,
+or visit the official release page. Supported Mac copies also offer
+**Skip this version**.
+
+Starting with 1.7.0, the signed Mac app installed from a release ZIP can also
+**Download update**, show progress, then **Restart and install** after your
+confirmation. Automatic downloading is optional and off by default; ordinary Quit
+never installs an update. Finish or stop downloads and empty the download list
+before installing. Saved sign-in, settings and music are retained.
+
+Homebrew installations use `brew upgrade --cask cyberdeliaAI/apps/ibfetch` (or
+`--formula` for Python). The portable Windows/Linux and Python/browser versions
+show the release notes and download link; replace their files manually after
+closing the old copy. To move from 1.6.0 to this first updater-enabled Mac version,
+install the new release manually once. See [desktop updates](docs/desktop-updates.md)
+for platform support and verification limits.
 
 ## File metadata
 

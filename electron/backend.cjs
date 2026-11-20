@@ -39,7 +39,8 @@ class Backend {
       const timer = setTimeout(fail, this.timeout);
       this.exited = new Promise(done => {
         this.child.once("error", () => { fail(); done(); });
-        this.child.once("exit", () => {
+        this.child.once("exit", (code, signal) => {
+          this.exitResult = {code, signal};
           fail(); done();
           if (!this.stopping) this.onExit();
         });
@@ -65,8 +66,13 @@ class Backend {
     if (this.child?.stdin.writable) this.child.stdin.end();
     // EOF allows graceful cancellation. A stuck read must not retain the app's
     // single-instance lock for the full network timeout. Only terminate our child.
-    const timer = setTimeout(() => this.child?.kill("SIGKILL"), this.stopTimeout);
-    this.stopPromise = (this.exited || Promise.resolve()).finally(() => clearTimeout(timer));
+    const timer = setTimeout(() => {
+      if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
+        this.forced = true; this.child.kill("SIGKILL");
+      }
+    }, this.stopTimeout);
+    this.stopPromise = (this.exited || Promise.resolve())
+      .then(() => ({...this.exitResult, forced: this.forced === true})).finally(() => clearTimeout(timer));
     return this.stopPromise;
   }
 }

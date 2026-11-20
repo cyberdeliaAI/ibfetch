@@ -308,7 +308,12 @@ def release_info(data):
     if not isinstance(tag, str) or not tag.startswith("v"):
         raise ValueError("Unsupported release tag")
     stable_version(tag[1:])
-    return {"version": tag[1:]}
+    result = {"version": tag[1:]}
+    if isinstance(data.get("name"), str):
+        result["name"] = data["name"][:200]
+    if isinstance(data.get("body"), str):
+        result["notes"] = data["body"][:50000]
+    return result
 
 
 class NoUpdateRedirect(urllib.request.HTTPRedirectHandler):
@@ -344,7 +349,8 @@ class UpdateChecker:
             if type(value) in (int, float) and 0 <= value <= time.time() and math.isfinite(value):
                 self.cache[key] = value
         try:
-            self.cache["latest"] = release_info({"tag_name": "v" + saved["latest"]["version"]})
+            self.cache["latest"] = release_info({"tag_name": "v" + saved["latest"]["version"],
+                "name": saved["latest"].get("name"), "body": saved["latest"].get("notes")})
         except (KeyError, TypeError, ValueError):
             pass
         if saved.get("error"):
@@ -355,6 +361,8 @@ class UpdateChecker:
             latest = self.cache.get("latest", {}).get("version")
             available = bool(latest and stable_version(latest) > stable_version(VERSION))
             return {"current": VERSION, "latest": latest, "available": available,
+                    "name": self.cache.get("latest", {}).get("name", ""),
+                    "notes": self.cache.get("latest", {}).get("notes", ""),
                     "url": RELEASES_URL + "/tag/v" + latest if available else RELEASES_URL + "/latest",
                     "checking": self.checking, "automatic": self.automatic,
                     "checked_at": self.cache.get("checked_at"), "error": bool(self.cache.get("error"))}
@@ -3394,6 +3402,19 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .mini.busy i { animation: none; width: 100% !important; opacity: .45; }
   .meter .fill { transition: none; }
 }
+#updateDialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 18px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); overflow: auto; }
+#updateDialog::backdrop { background: #0008; }
+#updateDialog h2 { margin: 0 0 8px; font: 600 20px/1.3 var(--round); }
+#updateDialog p { margin: 8px 0; }
+.update-notes { max-height: 35vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-block: 10px; overflow-wrap: anywhere; line-height: 1.5; }
+.update-notes h3, .update-notes h4, .update-notes h5, .update-notes h6 { margin: 12px 0 6px; font-size: 15px; }
+.update-notes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-notes ul, .update-notes ol { padding-left: 22px; }
+.update-notes table { display: block; overflow-x: auto; border-collapse: collapse; }
+.update-notes th, .update-notes td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; }
+.native-update { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-block: 8px; }
+.native-update progress { width: 100%; height: 10px; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 </style>
 </head>
 <body>
@@ -3415,7 +3436,8 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
       <label class="check"><input type="checkbox" id="autoUpdates" checked> Automatically check for updates</label>
       <div class="row-gap"><button id="checkUpdates">Check for updates</button>
         <a id="updateLink" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Releases &amp; downloads</a></div>
-      <p>No account or library data is sent. Installation is manual; quit ibfetch before upgrading.</p>
+      <p>No account or library data is sent. Open update details for the installation options.</p>
+      <button id="updateDetails" hidden>View update details</button>
       <div class="row-gap project-links">
         <a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">Tests</a>
         <a href="https://github.com/cyberdeliaAI/ibfetch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>
@@ -3439,6 +3461,25 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   <button id="signoutBtn" class="quiet" hidden>Sign out</button>
   <button id="quitBtn" class="quiet">Quit</button>
 </header>
+
+<dialog id="updateDialog" aria-labelledby="updateDialogTitle">
+  <h2 id="updateDialogTitle">ibfetch updates</h2>
+  <p id="updateDialogVersion"></p><p id="updateDialogName"></p>
+  <div id="releaseNotes" class="update-notes" tabindex="0" hidden></div>
+  <section class="native-update">
+    <p id="desktopUpdateStatus" role="status" aria-live="polite"></p>
+    <progress id="desktopProgress" max="100" value="0" aria-label="Update download progress" hidden></progress>
+    <label id="desktopAutoLabel" class="check" hidden><input id="desktopAuto" type="checkbox"> Automatically download updates</label>
+    <p id="desktopConsent" hidden>Downloading never installs an update. Restart and installation need your confirmation.</p>
+    <div class="row-gap update-actions">
+      <button id="desktopDownload" class="primary" hidden>Download update</button>
+      <button id="desktopInstall" class="primary" hidden>Restart and install</button>
+      <button id="desktopSkip" hidden>Skip this version</button>
+    </div>
+  </section>
+  <div class="row-gap update-actions"><button id="updateLater">Later</button>
+    <a id="dialogRelease" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Official release &amp; downloads ↗</a></div>
+</dialog>
 
 <main id="signin" class="center" hidden>
   <div class="signin">
@@ -3750,13 +3791,243 @@ function render() {
   updateDownloadButton();
 }
 
+const desktopUpdate = {data: null, explicit: false, manualWaiting: false, manualCheckedAt: undefined, offerKey: ""};
+let releaseData = null, displayedReleaseNotes = "";
+
+function applyDesktopUpdate(value) {
+  if (!value || typeof value.supported !== "boolean") return;
+  if (Number.isSafeInteger(value.revision) && Number.isSafeInteger(desktopUpdate.data?.revision)
+      && value.revision < desktopUpdate.data.revision) return;
+  desktopUpdate.data = value;
+  if (releaseData) renderUpdates(releaseData);
+}
+function offerDesktopUpdate(data) {
+  if (desktopUpdate.manualWaiting && !data.checking) {
+    desktopUpdate.manualWaiting = false; desktopUpdate.manualCheckedAt = data.checked_at ?? null;
+  } else if (desktopUpdate.explicit && data.checked_at && desktopUpdate.manualCheckedAt !== undefined
+      && data.checked_at !== desktopUpdate.manualCheckedAt) desktopUpdate.explicit = false;
+  const bridge = window.ibfetchUpdates;
+  if (!bridge || typeof bridge.offer !== "function" || !data.available || !updateURL(data).includes("/tag/")) return;
+  const automatic = !desktopUpdate.explicit && data.automatic && !data.checking;
+  const key = JSON.stringify([data.latest, data.checked_at, !!automatic, desktopUpdate.data?.autoDownload === true]);
+  if (key === desktopUpdate.offerKey) return;
+  desktopUpdate.offerKey = key;
+  bridge.offer(data.latest, !!automatic).then(applyDesktopUpdate).catch(() => {});
+}
+function nativeUpdateText() {
+  const value = desktopUpdate.data;
+  if (!value) return "Use the official release download to update this copy.";
+  const errors = {download:"The update could not be downloaded or verified. Try again or use the official release download.",
+    preferences:"The update preference could not be saved. Your previous choice is kept.",
+    install:"The update could not be installed safely. Restart ibfetch or use the official release download.",
+    busy:"Finish or stop the download and empty the download list before installing."};
+  if (value.error) return errors[value.error] || errors.download;
+  if (!value.supported) return value.reason === "homebrew"
+    ? "Update this Homebrew copy with: brew upgrade --cask cyberdeliaAI/apps/ibfetch"
+    : "Use the official release download for this portable, browser or test copy.";
+  if (value.state === "downloading") return `Downloading update: ${value.progress}%`;
+  if (value.state === "checking") return "Checking the update package…";
+  if (value.state === "finishing") return "Closing ibfetch safely before installation…";
+  if (value.state === "ready") return "Update downloaded and verified. Installation needs your confirmation.";
+  return "Download the update when you are ready. Installation is always your choice.";
+}
+function refreshNativeUpdateControls() {
+  const value = desktopUpdate.data;
+  const supported = value?.supported === true;
+  const matching = supported && value.version === releaseData?.latest;
+  const busy = ["checking","downloading","finishing"].includes(value?.state);
+  const ready = ["ready","finishing"].includes(value?.state);
+  const active = downloadStarting || !!queue.size || ["ready","planning","running"].includes(S?.transfer?.state);
+  $("desktopUpdateStatus").textContent = matching && ready && active && !value.error
+    ? "The update is ready. Finish or stop the download and empty the download list before installing." : nativeUpdateText();
+  $("desktopDownload").hidden = !matching || ready;
+  $("desktopDownload").disabled = busy;
+  $("desktopInstall").hidden = !matching || !ready;
+  $("desktopInstall").disabled = busy || active;
+  $("desktopSkip").hidden = !matching;
+  $("desktopSkip").disabled = busy;
+  $("desktopAutoLabel").hidden = $("desktopConsent").hidden = !supported;
+  $("desktopAuto").checked = value?.autoDownload === true;
+  $("desktopAuto").disabled = value?.state === "finishing";
+  $("desktopProgress").hidden = value?.state !== "downloading";
+  $("desktopProgress").value = Number.isFinite(value?.progress) ? Math.max(0,Math.min(100,value.progress)) : 0;
+}
+function refreshUpdateDialog() {
+  const data = releaseData;
+  if (!data) return;
+  $("updateDialogTitle").textContent = data.available ? `ibfetch ${data.latest} is available` : "ibfetch updates";
+  $("updateDialogVersion").textContent = `You are running ibfetch ${data.current}.`;
+  $("updateDialogName").textContent = data.name || "";
+  $("dialogRelease").href = updateURL(data);
+  const notes = typeof data.notes === "string" ? data.notes.slice(0,50000) : "";
+  if (notes !== displayedReleaseNotes) { $("releaseNotes").innerHTML = renderReleaseNotes(notes); displayedReleaseNotes = notes; }
+  $("releaseNotes").hidden = !notes;
+  refreshNativeUpdateControls();
+}
+function openUpdateDialog() {
+  if (!releaseData?.available) return;
+  setUpdatePanel(false); refreshUpdateDialog();
+  if (!$("updateDialog").open) $("updateDialog").showModal();
+  $("updateLater").focus();
+}
+function closeUpdateDialog() { $("updateDialog").close(); $("updateBtn").focus(); }
+async function nativeUpdateAction(action, value = releaseData?.latest) {
+  const bridge = window.ibfetchUpdates;
+  if (!bridge || !["download","install","skip","configure"].includes(action)) return;
+  try {
+    const result = await bridge[action](value);
+    applyDesktopUpdate(result);
+    if (action === "skip" && !result?.error && result?.skipped === value) {
+      desktopUpdate.explicit = false; closeUpdateDialog(); if (releaseData) renderUpdates(releaseData);
+    }
+  } catch { notice("The update action could not be completed. Try again or use the official release download.",true); }
+}
+
+const UPDATE_NOTES_LIMIT = 50000;
+
+function updateNotesURL(value) {
+  if (value.length > 8192 || /[\s\u0000-\u001f\u007f]/.test(value)) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
+}
+
+function updateNotesLinkEnd(text, start) {
+  let depth = 0;
+  for (let i = start; i < Math.min(text.length, start + 8193); i++) {
+    if (text[i] === "(") depth += 1;
+    if (text[i] === ")") { if (!depth) return i; depth -= 1; }
+  }
+  return -1;
+}
+
+function updateNotesInline(text, budget, depth = 0, links = true) {
+  const html = [], tokens = /`+|!\[|\[|https:\/\/|\*{1,2}|_{1,2}/g;
+  let copied = 0, match;
+  const append = (start, end, markup) => {
+    html.push(esc(text.slice(copied, start)), markup);
+    copied = end; tokens.lastIndex = end;
+  };
+  // A shared attempt budget also bounds unmatched delimiters and nested labels.
+  while (budget.inline > 0 && (match = tokens.exec(text))) {
+    budget.inline -= 1;
+    const marker = match[0], start = match.index, body = start + marker.length;
+    if (marker[0] === "`") {
+      const end = text.indexOf(marker, body);
+      if (end > body) append(start, end + marker.length, `<code>${esc(text.slice(body, end))}</code>`);
+    } else if (marker === "[" || marker === "![") {
+      const labelEnd = text.indexOf("](", body);
+      if (labelEnd < body) continue;
+      const end = updateNotesLinkEnd(text, labelEnd + 2);
+      if (end < 0) continue;
+      const label = text.slice(body, labelEnd), url = updateNotesURL(text.slice(labelEnd + 2, end));
+      const markup = marker === "[" && links && label && !label.includes("[") && url
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${updateNotesInline(label, budget, depth + 1, false)}</a>`
+        : esc(text.slice(start, end + 1));
+      append(start, end + 1, markup);
+    } else if (marker === "https://") {
+      if (!links || start && !/[\s(]/.test(text[start - 1])) continue;
+      let end = body;
+      while (end < text.length && !/[\s<>"'`]/.test(text[end])) end += 1;
+      let value = text.slice(start, end).replace(/[.,;:!?]+$/, "");
+      let balance = 0;
+      for (const char of value) { if (char === "(") balance += 1; else if (char === ")") balance -= 1; }
+      while (balance < 0 && value.endsWith(")")) { value = value.slice(0, -1); balance += 1; }
+      const url = updateNotesURL(value);
+      if (url) append(start, start + value.length, `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(value)}</a>`);
+      else append(start, end, esc(text.slice(start, end)));
+    } else if (depth < 2 && /\S/.test(text[body] || "") && !(marker.length === 1 && /[\w*_]/.test(text[start - 1] || ""))) {
+      const end = text.indexOf(marker, body);
+      if (end > body && /\S/.test(text[end - 1]) && !(marker.length === 1 && /[\w*_]/.test(text[end + 1] || ""))) {
+        const tag = marker.length === 2 ? "strong" : "em";
+        append(start, end + marker.length, `<${tag}>${updateNotesInline(text.slice(body, end), budget, depth + 1, links)}</${tag}>`);
+      }
+    }
+  }
+  html.push(esc(text.slice(copied)));
+  return html.join("");
+}
+
+function updateNotesCells(line) {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+}
+
+function renderReleaseNotes(markdown) {
+  if (typeof markdown !== "string") return "";
+  const bounded = markdown.slice(0, UPDATE_NOTES_LIMIT);
+  if (!bounded.trim()) return "";
+  const lines = bounded.replace(/\r\n?/g, "\n").replace(/\u0000/g, "\ufffd").split("\n");
+  const html = [], budget = {inline: 1500, cells: 2000};
+  const inline = text => updateNotesInline(text, budget);
+  let paragraph = [], list = null;
+  const endParagraph = () => { if (paragraph.length) html.push(`<p>${inline(paragraph.join(" "))}</p>`); paragraph = []; };
+  const endList = () => {
+    if (list) html.push(`<${list.tag}>${list.items.map(item => `<li>${inline(item)}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+  const endBlocks = () => { endParagraph(); endList(); };
+  const tableLine = line => /^\s*\|.*\|\s*$/.test(line);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], fence = /^ {0,3}(`{3,}|~{3,})[^\n]*$/.exec(line);
+    if (fence) {
+      endBlocks();
+      const code = [], closing = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`);
+      for (i++; i < lines.length && !closing.test(lines[i]); i++) code.push(lines[i]);
+      html.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (!line.trim()) { endBlocks(); continue; }
+    const heading = /^ {0,3}(#{1,6})[ \t]+(.+)$/.exec(line);
+    if (heading) {
+      endBlocks();
+      const level = Math.min(6, heading[1].length + 2);
+      let label = heading[2].trimEnd(), end = label.length;
+      while (end && label[end - 1] === "#") end -= 1;
+      if (end && /\s/.test(label[end - 1])) label = label.slice(0, end).trimEnd();
+      html.push(`<h${level}>${inline(label)}</h${level}>`);
+      continue;
+    }
+    if (/^ {0,3}([-*_])(?:[ \t]*\1){2,}\s*$/.test(line)) { endBlocks(); html.push("<hr>"); continue; }
+    if (tableLine(line) && tableLine(lines[i + 1] || "")) {
+      const head = updateNotesCells(line), separator = updateNotesCells(lines[i + 1]);
+      if (head.length <= 20 && head.length <= budget.cells && head.length === separator.length && separator.every(cell => /^:?-{2,}:?$/.test(cell))) {
+        endBlocks();
+        const rows = []; budget.cells -= head.length;
+        for (i += 2; i < lines.length && tableLine(lines[i]); i++) {
+          const cells = updateNotesCells(lines[i]);
+          if (cells.length !== head.length || head.length > budget.cells) break;
+          budget.cells -= head.length; rows.push(cells);
+        }
+        i--;
+        html.push(`<table><thead><tr>${head.map(cell => `<th scope="col">${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        continue;
+      }
+    }
+    const item = /^\s*(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      endParagraph();
+      const tag = item[1] ? "ul" : "ol";
+      if (!list || list.tag !== tag) { endList(); list = {tag, items: []}; }
+      list.items.push(item[3]); continue;
+    }
+    if (list && /^\s+\S/.test(line)) { list.items[list.items.length - 1] += " " + line.trim(); continue; }
+    endList(); paragraph.push(line.trim());
+  }
+  endBlocks();
+  return html.join("\n");
+}
+
+
 function updateURL(data) {
   return data?.available && /^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/.test(data.latest || "")
     ? `https://github.com/cyberdeliaAI/ibfetch/releases/tag/v${data.latest}` : "https://github.com/cyberdeliaAI/ibfetch/releases/latest";
 }
 function renderUpdates(data) {
   if (!data) return;
-  const available = data.available && updateURL(data).includes("/tag/");
+  releaseData = data;
+  const available = data.available && updateURL(data).includes("/tag/")
+    && (desktopUpdate.explicit || desktopUpdate.data?.skipped !== data.latest);
   $("currentVersion").textContent = data.current;
   $("updateBtn").textContent = available ? `Update available · ${data.latest}` : `ibfetch ${data.current}`;
   $("updateBtn").className = available ? "quiet available" : "quiet";
@@ -3769,6 +4040,9 @@ function renderUpdates(data) {
     available ? `Version ${data.latest} is available. You are running ${data.current}.` :
     data.latest ? `You are running ${data.current}. Latest stable release: ${data.latest}.` :
     data.automatic ? "Updates are checked automatically, at most once a day." : "Automatic checks are off. You can still check manually.";
+  $("updateDetails").hidden = !data.available;
+  offerDesktopUpdate(data);
+  if ($("updateDialog").open) refreshUpdateDialog();
 }
 function setUpdatePanel(open, focus = false) {
   $("updatePanel").hidden = !open;
@@ -3777,9 +4051,13 @@ function setUpdatePanel(open, focus = false) {
   if (focus) $("updateBtn").focus();
 }
 async function checkUpdates() {
+  desktopUpdate.explicit = true; desktopUpdate.manualWaiting = true;
   $("checkUpdates").disabled = true;
   try { const data = await api("/api/updates/check", {}); if (S) S.updates = data; renderUpdates(data); }
-  catch (error) { notice("Could not check for updates. Try again later.", true); }
+  catch (error) {
+    desktopUpdate.manualWaiting = false; desktopUpdate.manualCheckedAt = releaseData?.checked_at ?? null;
+    notice("Could not check for updates. Try again later.", true);
+  }
   finally { $("checkUpdates").disabled = !!S?.updates?.checking; }
 }
 async function saveUpdatePreference() {
@@ -4295,7 +4573,21 @@ function renderTransfer() {
 }
 
 /* events */
-$("updateBtn").addEventListener("click", () => setUpdatePanel($("updatePanel").hidden));
+$("updateBtn").addEventListener("click", () => {
+  if (releaseData?.available && (desktopUpdate.explicit || desktopUpdate.data?.skipped !== releaseData.latest)) openUpdateDialog();
+  else setUpdatePanel($("updatePanel").hidden);
+});
+$("updateDetails").addEventListener("click", openUpdateDialog);
+$("updateLater").addEventListener("click", closeUpdateDialog);
+$("updateDialog").addEventListener("close", () => $("updateBtn").focus());
+$("desktopDownload").addEventListener("click", () => nativeUpdateAction("download"));
+$("desktopInstall").addEventListener("click", () => nativeUpdateAction("install"));
+$("desktopSkip").addEventListener("click", () => nativeUpdateAction("skip"));
+$("desktopAuto").addEventListener("change", () => nativeUpdateAction("configure", $("desktopAuto").checked));
+if (typeof window.ibfetchUpdates?.onStatus === "function") {
+  window.ibfetchUpdates.onStatus(applyDesktopUpdate);
+  window.ibfetchUpdates.status().then(applyDesktopUpdate).catch(() => {});
+}
 $("checkUpdates").addEventListener("click", checkUpdates);
 $("autoUpdates").addEventListener("change", saveUpdatePreference);
 $("themeBtn").addEventListener("click", () => setThemeMenu($("themeMenu").hidden));
