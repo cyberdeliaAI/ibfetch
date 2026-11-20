@@ -567,3 +567,27 @@ test("skip hides a notification until an explicit check while keeping the downlo
   h.run('desktopUpdate.explicit=true;renderUpdates(releaseData);');assert.match(h.node('updateBtn').textContent,/Update available/);
   assert.equal(h.run('queue.size'),1);
 });
+
+test("available updates keep manual checks and opt-out reachable for browser, Homebrew and native copies", async () => {
+  for (const native of [null,{revision:1,supported:false,reason:'homebrew',version:'1.8.0'},
+    {revision:1,supported:true,state:'available',version:'1.8.0'}]) {
+    const h=harness({events:true});
+    h.run(`S={updates:{current:'1.7.0',latest:'1.8.0',available:true,automatic:true,checking:false}};
+      queue.set(1,{id:1});checked.add(2);renderUpdates(S.updates);
+      api=async(path,body)=>{globalThis.lastUpdateAction=path;return {...S.updates,automatic:body.automatic??S.updates.automatic};};`);
+    if(native)h.run(`applyDesktopUpdate(${JSON.stringify(native)});`);
+    h.node('updateBtn').listeners.click();assert.equal(h.node('updateDialog').open,true);
+    let stopped=false;h.node('updateSettings').listeners.click({stopPropagation(){stopped=true;}});
+    assert.equal(stopped,true,'the outside-click handler must not close settings immediately');
+    assert.equal(h.node('updateDialog').open,false);assert.equal(h.node('updatePanel').hidden,false);
+    assert.equal(h.node('checkUpdates').focused,true);
+    const focus=h.node('updateBtn').focus;
+    h.node('updateBtn').focus=()=>{throw Error('a queued dialog close must not steal focus from settings');};
+    h.node('updateDialog').listeners.close();h.node('updateBtn').focus=focus;
+    h.node('autoUpdates').checked=false;await h.node('autoUpdates').listeners.change();
+    assert.equal(h.run('S.updates.automatic'),false);assert.equal(h.run('lastUpdateAction'),'/api/updates/settings');
+    await h.node('checkUpdates').listeners.click();assert.equal(h.run('lastUpdateAction'),'/api/updates/check');
+    assert.equal(h.run('queue.has(1)&&checked.has(2)'),true);
+    h.node('updateDetails').listeners.click();assert.equal(h.node('updateDialog').open,true);
+  }
+});

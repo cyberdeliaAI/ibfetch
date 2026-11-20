@@ -44,7 +44,7 @@ from pathlib import Path
 from socketserver import TCPServer
 from types import SimpleNamespace
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 CLIENT = "ibfetch"
 USER_AGENT = f"{CLIENT}/{VERSION}"
 # Public OAuth client ID (the Tagcast app). Device-code sign-in uses no client secret.
@@ -3478,6 +3478,7 @@ details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
     </div>
   </section>
   <div class="row-gap update-actions"><button id="updateLater">Later</button>
+    <button id="updateSettings">Update settings</button>
     <a id="dialogRelease" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Official release &amp; downloads ↗</a></div>
 </dialog>
 
@@ -4579,7 +4580,11 @@ $("updateBtn").addEventListener("click", () => {
 });
 $("updateDetails").addEventListener("click", openUpdateDialog);
 $("updateLater").addEventListener("click", closeUpdateDialog);
-$("updateDialog").addEventListener("close", () => $("updateBtn").focus());
+$("updateSettings").addEventListener("click", event => {
+  event.stopPropagation();
+  closeUpdateDialog(); setUpdatePanel(true); $("checkUpdates").focus();
+});
+$("updateDialog").addEventListener("close", () => { if ($("updatePanel").hidden) $("updateBtn").focus(); });
 $("desktopDownload").addEventListener("click", () => nativeUpdateAction("download"));
 $("desktopInstall").addEventListener("click", () => nativeUpdateAction("install"));
 $("desktopSkip").addEventListener("click", () => nativeUpdateAction("skip"));

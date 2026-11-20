@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- Keep manual release checks and the automatic-check opt-out accessible from an available-update dialog on every platform.
+- Add pointer-driven native coverage for opening update settings and returning to release notes without losing selections.
+
 ## 1.7.0
 
 - Add Tagcast-style release notes, update progress, Later/Skip controls and optional automatic downloads, disabled by default.
