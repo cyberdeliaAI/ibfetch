@@ -61,9 +61,14 @@ async function checkUpdates({window, updates}) {
       complete();await until("desktopUpdate.data?.state==='ready'");
       assert.equal(await run("document.getElementById('desktopInstall').disabled"),true);
       assert.equal(await run("queue.has(900)&&checked.has(901)&&history.length===updateSmokeBefore.history"),true);
+      await click('#updateSettings');
+      assert.equal(await run("!document.getElementById('updateDialog').open&&!document.getElementById('updatePanel').hidden&&document.activeElement.id==='checkUpdates'"),true);
+      assert.equal(await run("queue.has(900)&&checked.has(901)"),true);
+      await click('#updateDetails');
+      assert.equal(await run("document.getElementById('updateDialog').open"),true);
       await run("queue.clear();refreshNativeUpdateControls()");
       await click('#desktopInstall');await until("desktopUpdate.data?.error==='busy'");
-      cases.push({width,theme,pointer:true,progress:true,installationDeferred:true,selectionsPreserved:true});
+      cases.push({width,theme,pointer:true,progress:true,installationDeferred:true,selectionsPreserved:true,settingsReachable:true});
       await click('#updateLater');
     }
     assert.equal(downloads,8);assert.equal(installRequests,8);

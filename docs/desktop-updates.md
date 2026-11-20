@@ -4,7 +4,9 @@
 
 The header shows the running version and **Update available** when a newer stable
 release is found. Open it for release notes, **Later**, a fixed official release
-link and the installation controls available for your copy. Supported Mac copies
+link and the installation controls available for your copy. Choose **Update
+settings** to reach manual checks, the automatic-check opt-out and project links
+even while a newer release is available. Supported Mac copies
 also offer **Skip this version**; manual checks can still reveal a skipped version. Notes are rendered as a
 bounded Markdown subset; raw HTML and images never execute or load.
 
