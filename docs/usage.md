@@ -1,4 +1,4 @@
-# Using ibfetch 1.8.0
+# Using ibfetch 1.8.1
 
 The project builds one Rust application. The native window uses egui. The same
 binary also provides the terminal commands and serves the existing browser UI
@@ -29,7 +29,10 @@ app at `target/release/ibfetch.app`.
 
 ## Set up sign-in and a profile
 
-Sign-in uses the same public iBroadcast OAuth client ID as ibfetch 1.7.1.
+New sign-ins in 1.8.1 use ibfetch's own iBroadcast registration.
+Version 1.8.0 shipped with the registration shared with Tagcast. Existing
+sessions keep using the client ID saved at sign-in. To switch an existing
+session to the ibfetch registration, sign out, then sign in with 1.8.1 or later.
 A custom build can override it with `IBROADCAST_CLIENT_ID` at build time or
 runtime. The CLI also accepts `ibfetch login --client-id YOUR_ID`.
 

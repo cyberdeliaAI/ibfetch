@@ -20,8 +20,8 @@ use std::{
 use tokio::runtime::{Builder, Runtime};
 use tokio_util::sync::CancellationToken;
 
-// Public device-flow registration shared with ibfetch 1.7.x.
-const DEFAULT_CLIENT_ID: &str = "5d8e2ee2bfee11f1b50eb49691aa2236";
+// Public iBroadcast device-flow registration for ibfetch.
+const DEFAULT_CLIENT_ID: &str = "3c2ba6a3e69e11f1b50eb49691aa2236";
 const BUILT_IN_CLIENT_ID: Option<&str> = option_env!("IBROADCAST_CLIENT_ID");
 const VERIFY: &str = "https://oauth.ibroadcast.com/device";
 const SCOPES: &str = "user.library:read user.account:read";

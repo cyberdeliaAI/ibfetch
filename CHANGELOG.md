@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1
+
+- Use ibfetch's own iBroadcast registration for new sign-ins. Existing sessions continue to refresh with their original client ID.
+
 ## 1.8.0
 
 - Move the native desktop app, browser UI and CLI to a shared Rust executable. The desktop window uses egui.
