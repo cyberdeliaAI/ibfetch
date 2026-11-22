@@ -1,6 +1,6 @@
 # macOS Developer ID signing and notarization
 
-This page covers the 1.7.1 Python/Electron release. For the native 1.8.0 development version, see the [usage guide](usage.md).
+This page covers the 1.7.1 Python/Electron release. For the native 1.8.0 release, see the [usage guide](usage.md).
 
 The official 1.6.0 Mac downloads are Developer ID signed and notarized by Apple,
 including attached tickets and verification of the extracted archives. Historical

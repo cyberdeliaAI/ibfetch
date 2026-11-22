@@ -1,6 +1,6 @@
 # Third-party notices
 
-This page covers the 1.7.1 Python/Electron release. For the native 1.8.0 development version, see the [usage guide](usage.md).
+This page covers the 1.7.1 Python/Electron release. For the native 1.8.0 release, see the [usage guide](usage.md).
 
 ibfetch's own code and documentation are MIT licensed; see the root LICENSE.
 The standalone desktop downloads include other software under its own terms.

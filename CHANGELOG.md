@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.8.0 (unreleased)
+## 1.8.0
 
 - Move the native desktop app, browser UI and CLI to a shared Rust executable. The desktop window uses egui.
 - Use the existing ibfetch profile and OAuth registration. The app checks the official ibfetch release feed and opens release downloads for manual installation.

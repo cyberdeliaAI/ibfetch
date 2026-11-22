@@ -4,13 +4,32 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/ibroadcast-dark-compact-powered.svg"><img src="assets/ibroadcast-light-compact-powered.svg" width="220" alt="Powered by iBroadcast"></picture><br><sub>Independent app by Cyberdelia</sub></p>
 <p align="center"><a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml"><img src="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml/badge.svg" alt="Tests"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2e7d4f" alt="MIT license"></a></p>
 
-**Development version: 1.8.0 (unreleased).** ibfetch now uses a single Rust
-executable for the native desktop app, local browser interface and CLI.
+**[Download ibfetch 1.8.0](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.0).**
+One Rust executable provides a native desktop app, a local browser interface and
+the command line.
 
-**Current download: [ibfetch 1.7.1](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.7.1).**
-Get the released macOS, Windows, Linux and Python downloads there.
-For Homebrew, installation instructions and the Python/Electron source, see
-[the 1.7.1 guide](https://github.com/cyberdeliaAI/ibfetch/tree/v1.7.1#install).
+| Platform | Download | After extracting |
+| --- | --- | --- |
+| macOS 13+, Apple Silicon | [Mac ARM64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.0/ibfetch-1.8.0-macos-arm64.zip) | Move `ibfetch.app` to Applications |
+| macOS 13+, Intel | [Mac x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.0/ibfetch-1.8.0-macos-x64.zip) | Move `ibfetch.app` to Applications |
+| Windows x64 | [Windows ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.0/ibfetch-1.8.0-windows-x64.zip) | Open `ibfetch.exe` |
+| Linux x64 | [Linux tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.0/ibfetch-1.8.0-linux-x64.tar.gz) | Run `./ibfetch` |
+
+Both Mac downloads are Developer ID signed and notarized by Apple. The Windows
+executable is unsigned. For the browser app, run `ibfetch gui`. Use
+`ibfetch --help` for terminal commands. The [classic 1.7.1 release](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.7.1)
+also provides the previous Python/browser version.
+
+### Homebrew
+
+Install the Mac desktop app with `brew install --cask cyberdeliaAI/apps/ibfetch`.
+The cask also provides `ibfetch-cli`. For the browser and CLI on macOS or
+Linux, use `brew install --formula cyberdeliaAI/apps/ibfetch`. To upgrade
+an existing installation, quit the app, run `brew update` and use
+`brew upgrade --cask cyberdeliaAI/apps/ibfetch` or
+`brew upgrade --formula cyberdeliaAI/apps/ibfetch`.
+
+## Features
 
 - Browse and sort your music by album, artist, genre, year, format, tags or playlists.
 - Download original files through iBroadcast's download service, or stream the
@@ -39,7 +58,7 @@ On macOS, `scripts/make-rust-macos-app.sh` builds `target/release/ibfetch.app`.
 See the [usage guide](docs/usage.md) for settings and downloads and the
 [macOS signing guide](docs/macos-signing.md) for signing development builds.
 
-### Trying 1.8.0 alongside 1.7.1
+### Upgrading from 1.7.1
 
 Close 1.7.1 before using its settings and music folders with 1.8.0. The new
 version uses ibfetch's existing profile, iBroadcast registration and per-folder

@@ -1,4 +1,4 @@
-# Using ibfetch 1.8.0 (unreleased)
+# Using ibfetch 1.8.0
 
 The project builds one Rust application. The native window uses egui. The same
 binary also provides the terminal commands and serves the existing browser UI
@@ -59,11 +59,9 @@ app shows the device code and waits for approval. Use **Switch User** on the
 iBroadcast page when changing the browser's remembered account. The native
 version shows release notes and links to downloads. Install new versions
 manually. The update check reads stable releases from the official ibfetch repository.
-1.7.1 is the current release. The 1.8.0 development builds are available from GitHub Actions.
+Get the platform downloads and checksums from the [1.8.0 release](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.0).
 
 The fixture suite checks path selection, both download routes, existing data,
 work-folder moves, browser authorization and account isolation with disposable
-folders and loopback HTTP. Before a public Rust release, run the platform build
-matrix, compare additional filename templates, verify recovery and naming on
-the real SMB share, and test signing/notarization and upgrades from the previous
-release.
+folders and loopback HTTP. When moving an existing library on a network share,
+try a small selection first and check its filenames and manifest before starting a large batch.
