@@ -75,15 +75,15 @@ cargo run --locked -- --home ~/ibfetch-test-profile
 
 ## Screenshots
 
-These screenshots come from the 1.7.1 guide and show the classic desktop app.
+The native ibfetch 1.8.1 app on macOS.
 
-**Forest palette:** browse albums by artist while downloading original-quality files.
+**Browsing and downloading.** The Amber palette shows six albums by Astrud Gilberto and the progress of a 12-track download.
 
-![ibfetch in the Forest palette, showing 10cc albums and an active download](docs/screenshots/ibfetch-forest-download.png)
+![Album search results for Astrud Gilberto with progress bars for three FLAC files](docs/screenshots/ibfetch-amber-download.png)
 
-**Amber · Original palette:** filter the library by tag and follow download progress.
+**Choosing a theme.** The Theme menu shows the iBroadcast inspired palette with appearance set to follow the system.
 
-![ibfetch in the Amber palette, showing tag-filtered albums and download progress](docs/screenshots/ibfetch-amber-tags.png)
+![Open Theme menu with Auto selected and all five colour palettes visible](docs/screenshots/ibfetch-theme-menu.png)
 
 ## License
 
