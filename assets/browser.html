@@ -1,0 +1,1763 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ibfetch-token" content="__TOKEN__">
+<meta name="ibfetch-appearance" content="__APPEARANCE__">
+<meta name="ibfetch-palette" content="__PALETTE__">
+<script>
+(() => {
+  const root = document.documentElement;
+  const appearance = document.querySelector('meta[name="ibfetch-appearance"]').content;
+  const palette = document.querySelector('meta[name="ibfetch-palette"]').content;
+  root.dataset.appearance = ["auto", "light", "dark"].includes(appearance) ? appearance : "auto";
+  root.dataset.palette = ["forest", "ocean", "warm", "ibroadcast", "amber"].includes(palette) ? palette : "forest";
+  const dark = root.dataset.appearance === "dark" || (root.dataset.appearance === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  root.dataset.theme = dark ? "dark" : "light";
+})();
+</script>
+<title>ibfetch</title>
+<style>
+/* Tagcast colour roles, adapted to ibfetch; appearance and palette are independent. */
+:root {
+  --bg: #f7f8f4;
+  --panel: #fbfcf9;
+  --raised: #ffffff;
+  --ink: #203329;
+  --muted: #68746c;
+  --line: #e0e5dd;
+  --accent: #2d654d;
+  --accent-fill: #2d654d;
+  --accent-soft: #e5ecd9;
+  --focus: #759345;
+  --shell: #1e3027;
+  --shell-ink: #dce7de;
+  --shell-muted: #b5c6b8;
+  --shell-active: #344b3d;
+  --shell-line: #3a4e40;
+  --shell-accent: #d2e59e;
+  --window: #1e3027;
+  --window-ink: #d2e59e;
+  --window-dim: #b5c6b8;
+  --window-track: #344b3d;
+  --window-stats: #dce7de;
+  --primary-ink: #ffffff;
+  --red: #b9302a;
+}
+:root { --round: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color-scheme: light; }
+:root[data-theme="dark"] {
+  --bg: #121915;
+  --panel: #18211c;
+  --raised: #1b2520;
+  --ink: #d3ebde;
+  --muted: #a7b3ab;
+  --line: #393b37;
+  --accent: #91cbaf;
+  --accent-fill: #91cbaf;
+  --accent-soft: #2b2e26;
+  --focus: #8fae60;
+  --shell: #1e3027;
+  --shell-ink: #dce7de;
+  --shell-muted: #b5c6b8;
+  --shell-active: #344b3d;
+  --shell-line: #3a4e40;
+  --shell-accent: #d2e59e;
+  --window: #1e3027;
+  --window-ink: #d2e59e;
+  --window-dim: #b5c6b8;
+  --window-track: #344b3d;
+  --window-stats: #dce7de;
+  --primary-ink: #1b2520;
+  --red: #e5574b;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-palette="ocean"] {
+  --bg: #f5f8fa;
+  --panel: #f0f5f8;
+  --raised: #ffffff;
+  --ink: #213746;
+  --muted: #536b7a;
+  --line: #d7e3e9;
+  --accent: #246276;
+  --accent-fill: #246276;
+  --accent-soft: #e5f0f4;
+  --focus: #559bac;
+  --shell: #172d38;
+  --shell-ink: #e8f3f7;
+  --shell-muted: #b2c8d3;
+  --shell-active: #294958;
+  --shell-line: #435e6b;
+  --shell-accent: #9bdce7;
+  --window: #172d38;
+  --window-ink: #9bdce7;
+  --window-dim: #b2c8d3;
+  --window-track: #294958;
+  --window-stats: #e8f3f7;
+  --primary-ink: #ffffff;
+  --red: #b9302a;
+}
+:root[data-palette="ocean"][data-theme="dark"] {
+  --bg: #101f28;
+  --panel: #162731;
+  --raised: #1a2d38;
+  --ink: #e0eef3;
+  --muted: #afc4cf;
+  --line: #344956;
+  --accent: #90d9e6;
+  --accent-fill: #286b7b;
+  --accent-soft: #233f4c;
+  --focus: #67b8cb;
+  --shell: #172d38;
+  --shell-ink: #e8f3f7;
+  --shell-muted: #b2c8d3;
+  --shell-active: #294958;
+  --shell-line: #435e6b;
+  --shell-accent: #9bdce7;
+  --window: #172d38;
+  --window-ink: #9bdce7;
+  --window-dim: #b2c8d3;
+  --window-track: #294958;
+  --window-stats: #e8f3f7;
+  --primary-ink: #ffffff;
+  --red: #e5574b;
+}
+:root[data-palette="warm"] {
+  --bg: #faf7f2;
+  --panel: #f7f1e8;
+  --raised: #fffefa;
+  --ink: #3b2c23;
+  --muted: #76614f;
+  --line: #e6dcd0;
+  --accent: #805334;
+  --accent-fill: #805334;
+  --accent-soft: #f0e4d6;
+  --focus: #b18459;
+  --shell: #33281f;
+  --shell-ink: #f7eee3;
+  --shell-muted: #d0bfae;
+  --shell-active: #574233;
+  --shell-line: #735b48;
+  --shell-accent: #efc99e;
+  --window: #33281f;
+  --window-ink: #efc99e;
+  --window-dim: #d0bfae;
+  --window-track: #574233;
+  --window-stats: #f7eee3;
+  --primary-ink: #ffffff;
+  --red: #b9302a;
+}
+:root[data-palette="warm"][data-theme="dark"] {
+  --bg: #211a15;
+  --panel: #2a211b;
+  --raised: #30251d;
+  --ink: #f2e8dc;
+  --muted: #c7b6a5;
+  --line: #564336;
+  --accent: #e6bf96;
+  --accent-fill: #865632;
+  --accent-soft: #483425;
+  --focus: #d2a16e;
+  --shell: #33281f;
+  --shell-ink: #f7eee3;
+  --shell-muted: #d0bfae;
+  --shell-active: #574233;
+  --shell-line: #735b48;
+  --shell-accent: #efc99e;
+  --window: #33281f;
+  --window-ink: #efc99e;
+  --window-dim: #d0bfae;
+  --window-track: #574233;
+  --window-stats: #f7eee3;
+  --primary-ink: #ffffff;
+  --red: #e5574b;
+}
+:root[data-palette="ibroadcast"] {
+  --bg: #f4f7fb;
+  --panel: #edf3fa;
+  --raised: #ffffff;
+  --ink: #1c3048;
+  --muted: #53677f;
+  --line: #d5dfeb;
+  --accent: #1c559b;
+  --accent-fill: #1c559b;
+  --accent-soft: #e3edf9;
+  --focus: #518ec5;
+  --shell: #162234;
+  --shell-ink: #ecedf1;
+  --shell-muted: #b7bec9;
+  --shell-active: #184e8e;
+  --shell-line: #30445f;
+  --shell-accent: #a0dafa;
+  --window: #162234;
+  --window-ink: #a0dafa;
+  --window-dim: #b7bec9;
+  --window-track: #184e8e;
+  --window-stats: #ecedf1;
+  --primary-ink: #ffffff;
+  --red: #b9302a;
+}
+:root[data-palette="ibroadcast"][data-theme="dark"] {
+  --bg: #0d1828;
+  --panel: #162234;
+  --raised: #1e2d43;
+  --ink: #eceef2;
+  --muted: #b1bdcd;
+  --line: #2d405b;
+  --accent: #9bd9f8;
+  --accent-fill: #1c559b;
+  --accent-soft: #213d60;
+  --focus: #5c99d6;
+  --shell: #162234;
+  --shell-ink: #ecedf1;
+  --shell-muted: #b7bec9;
+  --shell-active: #184e8e;
+  --shell-line: #30445f;
+  --shell-accent: #a0dafa;
+  --window: #162234;
+  --window-ink: #a0dafa;
+  --window-dim: #b7bec9;
+  --window-track: #184e8e;
+  --window-stats: #ecedf1;
+  --primary-ink: #ffffff;
+  --red: #e5574b;
+}
+/* Amber preserves the original neutral grey surfaces and orange accents. */
+:root[data-palette="amber"] {
+  --bg: #e2e4df;
+  --panel: #eff0ec;
+  --raised: #fafaf8;
+  --ink: #1c2024;
+  --muted: #5c636a;
+  --line: #c6cac2;
+  --accent: #b8730c;
+  --accent-fill: #e9a23a;
+  --accent-soft: #f3e1bd;
+  --focus: #b8730c;
+  --shell: #eff0ec;
+  --shell-ink: #1c2024;
+  --shell-muted: #5c636a;
+  --shell-active: #f3e1bd;
+  --shell-line: #c6cac2;
+  --shell-accent: #e9a23a;
+  --window: #15181b;
+  --window-ink: #f2a93b;
+  --window-dim: #7d6233;
+  --window-track: #2a2f34;
+  --window-stats: #c9b48e;
+  --primary-ink: #241600;
+}
+:root[data-palette="amber"][data-theme="dark"] {
+  --bg: #16181a;
+  --panel: #1f2225;
+  --raised: #272b2f;
+  --ink: #e5e6e2;
+  --muted: #969ca2;
+  --line: #353a3f;
+  --accent: #f0a63a;
+  --accent-fill: #f0a63a;
+  --accent-soft: #43361d;
+  --focus: #f0a63a;
+  --shell: #1f2225;
+  --shell-ink: #e5e6e2;
+  --shell-muted: #969ca2;
+  --shell-active: #43361d;
+  --shell-line: #353a3f;
+  --shell-accent: #f0a63a;
+  --window: #0e1012;
+  --window-ink: #f2a93b;
+  --window-dim: #7d6233;
+  --window-track: #23272b;
+  --window-stats: #c9b48e;
+  --primary-ink: #241600;
+}
+:root[data-palette="amber"] #crate input { background: var(--raised); }
+:root[data-palette="amber"] #crate .artist:hover:not([aria-pressed=true]) { background: var(--raised); }
+:root[data-palette="amber"] #crate #letters button[aria-pressed=true] { color: var(--primary-ink); }
+:root[data-palette="amber"] #crate :focus-visible { outline-color: var(--focus); }
+:root[data-palette="amber"] .tally b { color: #d9c59f; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+button {
+  border: 1px solid var(--line); background: var(--raised); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary {
+  background: var(--accent-fill); border-color: var(--accent-fill); color: var(--primary-ink); font-weight: 600;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.06); border-color: var(--accent-fill); }
+button.primary:disabled { background: var(--raised); border-color: var(--line); color: var(--muted); opacity: 1; font-weight: 500; }
+button.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line); }
+input[type=text], input[type=search], select {
+  width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised);
+  min-width: 0;
+}
+input::placeholder { color: var(--muted); opacity: .8; }
+label { display: block; }
+.field > span:first-child { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+
+/* header */
+.top {
+  height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { font: 600 19px/1 var(--round); letter-spacing: -.01em; margin-right: 6px; }
+.brand b { color: var(--accent); font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 6px; }
+.brand img { width: 25px; height: 25px; }
+.brand-block { flex: 0 0 auto; }
+.maker { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+.powered { display: inline-block; flex: 0 0 auto; line-height: 0; }
+.powered img { width: 132px; height: auto; }
+.powered .powered-dark { display: none; }
+:root[data-theme="dark"] .powered .powered-light { display: none; }
+:root[data-theme="dark"] .powered .powered-dark { display: inline; }
+.update-wrap { position: relative; }
+.appearance-panel.update-panel { width: 310px; max-width: calc(100vw - 28px); }
+.update-panel p { margin: 0; font-size: 13px; color: var(--muted); }
+.update-panel .check { display: flex; gap: 8px; align-items: flex-start; }
+.update-panel .row-gap { display: flex; gap: 8px; flex-wrap: wrap; }
+.update-panel a { font-size: 13px; }
+.update-panel .project-links a { color: var(--accent); }
+#updateBtn.available { color: var(--accent); background: var(--accent-soft); }
+#libInfo { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; }
+#account { color: var(--muted); white-space: nowrap; }
+.appearance { position: relative; }
+.appearance-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 5; width: 240px;
+  padding: 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 12px 32px #0003; display: grid; gap: 12px;
+}
+.badge {
+  display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px; margin-left: 4px;
+  background: var(--accent-soft); color: var(--ink);
+}
+
+/* sign-in */
+.center { min-height: calc(100% - 52px); display: grid; place-items: center; padding: 24px; }
+.signin { max-width: 460px; width: 100%; }
+.signin details { margin-top: 20px; }
+.signin summary { cursor: pointer; color: var(--muted); }
+.signin details p { margin-top: 14px; }
+.signin h1 { font: 600 28px/1.15 var(--round); margin: 0 0 10px; }
+.signin p { color: var(--muted); margin: 0 0 18px; }
+.code {
+  font: 300 40px/1 var(--round); letter-spacing: .06em; font-variant-numeric: tabular-nums;
+  background: var(--window); color: var(--window-ink); border-radius: 10px; padding: 18px 20px; margin: 0 0 14px;
+  text-align: center; text-shadow: 0 0 14px color-mix(in srgb, var(--window-ink) 35%, transparent);
+}
+.row-gap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+a.button {
+  display: inline-block; text-decoration: none; padding: 6px 12px; border-radius: 6px;
+  background: var(--accent-fill); color: var(--primary-ink); font-weight: 600;
+}
+.error { color: var(--red); }
+
+/* main grid */
+#app {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 350px; height: calc(100% - 52px);
+}
+#app > * { min-height: 0; overflow: auto; }
+
+/* artists */
+#crate { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; overflow: hidden; }
+#crate { background: var(--shell); color: var(--shell-ink); border-color: var(--shell-line); }
+#crate input { background: var(--shell-active); color: var(--shell-ink); border-color: var(--shell-line); }
+#crate input::placeholder, #crate .artist .count, #crate .more { color: var(--shell-muted); }
+#crate :focus-visible { outline-color: var(--shell-accent); }
+.crate-head { padding: 12px 12px 8px; }
+.crate-head h2, #deck h2 { font: 600 15px/1.2 var(--round); margin: 0 0 8px; }
+#letters { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 10px 8px; border-bottom: 1px solid var(--line); }
+#letters button {
+  padding: 2px 0; width: 25px; font-size: 12px; border: 0; background: transparent; color: var(--muted); border-radius: 4px;
+}
+#letters button.all { width: auto; padding: 2px 7px; }
+#letters button[aria-pressed=true] { background: var(--accent-fill); color: var(--primary-ink); font-weight: 600; }
+#crate #letters { border-color: var(--shell-line); }
+#crate #letters button { color: var(--shell-muted); }
+#crate #letters button[aria-pressed=true] { background: var(--shell-accent); color: var(--shell); }
+.head button.sort { width: 100%; border: 0; border-radius: 0; padding: 0; min-height: 40px; background: transparent; color: inherit; font: inherit; text-align: inherit; }
+.head button.sort:hover { color: var(--ink); text-decoration: underline; }
+#artistList { overflow: auto; flex: 1; padding: 6px 6px 16px; }
+.artist {
+  display: flex; width: 100%; justify-content: space-between; gap: 8px; text-align: left;
+  border: 0; background: transparent; padding: 5px 8px; border-radius: 5px;
+}
+.artist:hover { background: var(--raised); }
+.artist[aria-pressed=true] { background: var(--accent-soft); }
+#crate .artist:hover, #crate .artist[aria-pressed=true] { background: var(--shell-active); }
+.artist .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.artist.every { font-weight: 600; margin-bottom: 4px; }
+.more { color: var(--muted); padding: 6px 8px; margin: 0; font-size: 13px; }
+
+/* browse */
+#browse { display: flex; flex-direction: column; overflow: hidden; }
+#filters { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+.fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 10px; }
+.filter-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.check { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.hint { color: var(--muted); font-size: 13px; margin-left: auto; }
+.resultbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+#resultInfo { flex: 1; color: var(--muted); }
+#results { flex: 1; overflow: auto; position: relative; }
+.grid-row {
+  display: grid; grid-template-columns: 34px minmax(110px, 1fr) minmax(150px, 1.6fr) 50px 54px 86px 66px;
+  align-items: center; gap: 0 10px; padding: 0 16px 0 8px; min-height: 34px;
+}
+.head {
+  position: sticky; top: 0; z-index: 1; background: var(--bg); color: var(--muted); font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.row { border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); cursor: default; user-select: none; }
+.row:hover { background: var(--panel); }
+.row.on { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+.row.inq .c-album::before {
+  content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+  margin-right: 7px; vertical-align: 1px;
+}
+.row > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.c-chk { display: grid; place-items: center; }
+.expand {
+  border: 0; background: none; padding: 0; width: 20px; margin-right: 4px; color: var(--muted); cursor: pointer;
+  font-size: 11px; line-height: 1; transition: transform .15s;
+}
+.expand:hover { color: var(--ink); }
+.expand[aria-expanded=true] { transform: rotate(90deg); }
+.disc { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.tracklist { padding: 4px 16px 10px 66px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.tracklist ol { margin: 0; padding: 0; list-style: none; }
+.tracklist li { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 10px; padding: 2px 0; color: var(--muted); }
+.tracklist li b { font-weight: 400; color: var(--ink); }
+.tracklist .ta { margin-left: 10px; }
+.empty { padding: 48px 24px; color: var(--muted); max-width: 520px; margin: 0 auto; text-align: center; }
+.empty strong { display: block; color: var(--ink); font: 600 18px/1.3 var(--round); margin-bottom: 6px; }
+
+/* deck */
+#deck { border-left: 1px solid var(--line); background: var(--panel); padding: 14px 14px 24px; display: flex; flex-direction: column; gap: 14px; }
+.deck-head { display: flex; align-items: baseline; justify-content: space-between; }
+#queueInfo { color: var(--muted); font-size: 13px; }
+#queueList { list-style: none; margin: 0; padding: 0; max-height: 34vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+#queueList:empty { display: none; }
+#queueList li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 6px 6px 10px; border-bottom: 1px solid var(--line); }
+#queueList li:last-child { border-bottom: 0; }
+.q-album { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-artist { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.q-x { border: 0; background: none; color: var(--muted); padding: 2px 6px; font-size: 16px; line-height: 1; }
+.q-x:hover { color: var(--red); }
+.settings { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.settings .wide { grid-column: 1 / -1; }
+.source-help { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.field .folder, details .folder { display: flex; gap: 6px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+details p { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+#downloadBtn { padding: 10px 14px; font-size: 15px; }
+.premium-note { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* the transfer window */
+.window {
+  background: var(--window); color: var(--window-ink); border-radius: 12px; padding: 14px 16px 12px;
+  box-shadow: inset 0 0 0 1px #000, inset 0 1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(255,255,255,.4);
+}
+.window-top { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--window-dim); }
+.lamp { width: 8px; height: 8px; border-radius: 50%; background: #4a1a16; }
+.lamp.on { background: #ff5446; box-shadow: 0 0 8px #ff5446; animation: blink 1.6s ease-in-out infinite; }
+.lamp.done { background: var(--window-ink); box-shadow: 0 0 6px var(--window-ink); }
+@keyframes blink { 50% { opacity: .45; } }
+.counter {
+  font: 300 46px/1.05 var(--round); font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--window-ink) 35%, transparent); margin: 6px 0 8px; white-space: nowrap;
+}
+.counter small { font-size: 20px; color: var(--window-dim); text-shadow: none; }
+.meter { position: relative; height: 12px; background: repeating-linear-gradient(90deg, var(--window-track) 0 7px, transparent 7px 9px); }
+.meter .fill {
+  position: absolute; inset: 0 auto 0 0; width: 0;
+  background: repeating-linear-gradient(90deg, var(--window-ink) 0 7px, transparent 7px 9px);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--window-ink) 50%, transparent)); transition: width .4s linear;
+}
+.window-stats { margin-top: 9px; font-size: 13px; color: var(--window-stats); font-variant-numeric: tabular-nums; }
+.tally { display: flex; gap: 14px; margin-top: 4px; font-size: 12px; color: var(--window-dim); }
+.tally b { color: var(--window-stats); font-weight: 500; }
+.active { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.active li { font-size: 12px; }
+.active .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.mini { height: 3px; background: var(--line); border-radius: 2px; margin-top: 3px; overflow: hidden; }
+.mini i { display: block; height: 100%; background: var(--accent-fill); }
+.mini.busy i { width: 35% !important; animation: busy 1.4s ease-in-out infinite alternate; }
+@keyframes busy { from { transform: translateX(0); } to { transform: translateX(186%); } }
+.recent { list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--muted); }
+.recent li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 0; }
+.recent .st { display: inline-block; width: 86px; color: var(--ink); }
+.recent .fail { color: var(--red); }
+.fails { font-size: 12px; }
+.fails ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); max-height: 160px; overflow: auto; }
+
+/* toast */
+#notice {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: min(560px, 92vw);
+  background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 8px; font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25); z-index: 10;
+}
+#notice.bad { background: var(--red); color: #fff; }
+.bye { text-align: center; color: var(--muted); }
+.bye strong { display: block; color: var(--ink); font: 600 22px/1.3 var(--round); }
+
+@media (max-width: 1180px) {
+  #app { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  #deck { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); max-height: 46vh; }
+  .fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .appearance-panel.update-panel { position: fixed; top: 110px; left: 10px; right: 10px; width: auto; }
+  body { height: auto; }
+  #app { display: block; height: auto; }
+  #crate { max-height: 50vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  #browse { overflow: visible; }
+  #results { max-height: 70vh; }
+  #deck { max-height: none; }
+  .grid-row { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1.3fr) 44px; padding: 0 10px 0 4px; }
+  .grid-row > :nth-child(n+5) { display: none; }
+  .top { gap: 8px; padding: 0 10px; }
+  .top { flex-wrap: wrap; height: auto; min-height: 52px; padding-block: 8px; }
+  #account { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  #libInfo, #refreshBtn { display: none; }
+  .hint { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lamp.on { animation: none; }
+  .mini.busy i { animation: none; width: 100% !important; opacity: .45; }
+  .meter .fill { transition: none; }
+}
+#updateDialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 18px; border: 1px solid var(--line); border-radius: 12px; color: var(--ink); background: var(--panel); overflow: auto; }
+#updateDialog::backdrop { background: #0008; }
+#updateDialog h2 { margin: 0 0 8px; font: 600 20px/1.3 var(--round); }
+#updateDialog p { margin: 8px 0; }
+.update-notes { max-height: 35vh; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-block: 10px; overflow-wrap: anywhere; line-height: 1.5; }
+.update-notes h3, .update-notes h4, .update-notes h5, .update-notes h6 { margin: 12px 0 6px; font-size: 15px; }
+.update-notes pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.update-notes ul, .update-notes ol { padding-left: 22px; }
+.update-notes table { display: block; overflow-x: auto; border-collapse: collapse; }
+.update-notes th, .update-notes td { border: 1px solid var(--line); padding: 4px 7px; text-align: left; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand-block"><div class="brand"><img src="__IBFETCH_ICON__" alt=""><span>ib<b>fetch</b></span></div><span class="maker">by Cyberdelia</span></div>
+  <a class="powered" href="https://www.ibroadcast.com/" target="_blank" rel="noopener noreferrer" aria-label="Powered by iBroadcast">
+    <img class="powered-light" src="__POWERED_LIGHT__" alt="Powered by iBroadcast">
+    <img class="powered-dark" src="__POWERED_DARK__" alt="Powered by iBroadcast">
+  </a>
+  <span id="libInfo"></span>
+  <button id="refreshBtn" class="quiet" hidden title="Download the library index again">Refresh library</button>
+  <span class="spacer"></span>
+  <div class="update-wrap">
+    <button id="updateBtn" class="quiet" aria-expanded="false" aria-controls="updatePanel">ibfetch __VERSION__</button>
+    <div id="updatePanel" class="appearance-panel update-panel" hidden>
+      <strong>ibfetch <span id="currentVersion">__VERSION__</span></strong>
+      <p>Independent app by Cyberdelia. Not made or endorsed by iBroadcast.</p>
+      <p id="updateStatus" role="status" aria-live="polite">Updates are checked automatically, at most once a day.</p>
+      <label class="check"><input type="checkbox" id="autoUpdates" checked> Automatically check for updates</label>
+      <div class="row-gap"><button id="checkUpdates">Check for updates</button>
+        <a id="updateLink" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Releases &amp; downloads</a></div>
+      <p>No account or library data is sent. Open update details for the installation options.</p>
+      <button id="updateDetails" hidden>View update details</button>
+      <div class="row-gap project-links">
+        <a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml" target="_blank" rel="noopener noreferrer">Tests</a>
+        <a href="https://github.com/cyberdeliaAI/ibfetch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a>
+      </div>
+    </div>
+  </div>
+  <div class="appearance">
+    <button id="themeBtn" class="quiet" aria-expanded="false" aria-controls="themeMenu">◐ Theme ▾</button>
+    <div id="themeMenu" class="appearance-panel" hidden>
+      <label class="field"><span>Appearance</span><select id="appearanceChoice">
+        <option value="auto">Auto · follow system</option><option value="light">Light</option><option value="dark">Dark</option>
+      </select></label>
+      <label class="field"><span>Colour</span><select id="paletteChoice">
+        <option value="forest">Forest</option><option value="ocean">Ocean</option>
+        <option value="warm">Warm</option><option value="ibroadcast">iBroadcast inspired</option>
+        <option value="amber">Amber · Original</option>
+      </select></label>
+    </div>
+  </div>
+  <span id="account"></span>
+  <button id="signoutBtn" class="quiet" hidden>Sign out</button>
+  <button id="quitBtn" class="quiet">Quit</button>
+</header>
+
+<dialog id="updateDialog" aria-labelledby="updateDialogTitle">
+  <h2 id="updateDialogTitle">ibfetch updates</h2>
+  <p id="updateDialogVersion"></p><p id="updateDialogName"></p>
+  <div id="releaseNotes" class="update-notes" tabindex="0" hidden></div>
+  <div class="row-gap update-actions"><button id="updateLater">Later</button>
+    <button id="updateSettings">Update settings</button>
+    <a id="dialogRelease" class="button" href="https://github.com/cyberdeliaAI/ibfetch/releases/latest" target="_blank" rel="noopener noreferrer">Official release &amp; downloads ↗</a></div>
+</dialog>
+
+<main id="signin" class="center" hidden>
+  <div class="signin">
+    <h1>Sign in to iBroadcast</h1>
+    <div id="signinIdle">
+      <p>Sign in on the official iBroadcast website in a separate window. Approve the connection and ibfetch continues automatically. Your password stays on iBroadcast.</p>
+      <button id="signinBtn" class="primary">Sign in with iBroadcast</button>
+      <p class="hint">Using another account? Choose Switch User on iBroadcast's page if your browser remembers the previous one.</p>
+    </div>
+    <div id="signinWait" hidden>
+      <p id="signinStatus" role="status">Opening the iBroadcast sign-in window…</p>
+      <div class="row-gap">
+        <button id="signinOpen" class="primary">Open sign-in window</button>
+        <button id="signinCancel" class="quiet">Cancel</button>
+      </div>
+      <details id="signinFallback">
+        <summary>Use your browser or a code instead</summary>
+        <p>If the sign-in window is unavailable, open iBroadcast in your browser. Enter this code if requested:</p>
+        <div class="code" id="signinCode"></div>
+        <a id="signinLink" class="button" href="#" target="_blank" rel="noopener noreferrer">Open iBroadcast in your browser ↗</a>
+      </details>
+    </div>
+    <p id="signinError" class="error" role="alert" hidden></p>
+  </div>
+</main>
+
+<main id="app" hidden>
+  <aside id="crate" aria-label="Artists">
+    <div class="crate-head">
+      <h2>Artists</h2>
+      <input id="artistFind" type="search" placeholder="Find an artist" aria-label="Find an artist" autocomplete="off">
+    </div>
+    <nav id="letters" aria-label="First letter"></nav>
+    <div id="artistList"></div>
+  </aside>
+
+  <section id="browse" aria-label="Albums">
+    <form id="filters" autocomplete="off">
+      <div class="fields">
+        <label class="field"><span>Album artist</span><input id="fArtist" type="text" placeholder="4hero or A*"></label>
+        <label class="field"><span>Album</span><input id="fAlbum" type="text" placeholder="Title or Two*"></label>
+        <label class="field"><span>Track artist</span><input id="fTrackArtist" type="text" placeholder="Also on compilations"></label>
+        <label class="field"><span>Year</span><input id="fYear" type="text" placeholder="1998 or 1990-1999"></label>
+        <label class="field"><span>Genre</span><input id="fGenre" type="text" list="genreList" placeholder="Any genre"></label>
+        <label class="field"><span>Format</span><select id="fFormat"><option value="">Any format</option></select></label>
+        <label class="field"><span>Tag</span><select id="fTag"><option value="">Any tag</option></select></label>
+        <label class="field"><span>Playlist</span><select id="fPlaylist"><option value="">Any playlist</option></select></label>
+      </div>
+      <datalist id="genreList"></datalist>
+      <div class="filter-actions">
+        <button type="submit" class="primary">Search</button>
+        <button type="button" id="clearBtn" class="quiet">Clear</button>
+        <label class="check"><input id="fSkipThe" type="checkbox"> Ignore “The” at the start</label>
+        <span class="hint">* matches anything, so A* finds every name starting with A.</span>
+      </div>
+    </form>
+    <div class="resultbar">
+      <span id="resultInfo" aria-live="polite"></span>
+      <button id="addSelBtn" disabled>Add selected</button>
+      <button id="addAllBtn" disabled>Add all</button>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <aside id="deck" aria-label="Download">
+    <div>
+      <div class="deck-head"><h2>Download list</h2><button id="clearQueueBtn" class="quiet" hidden>Empty list</button></div>
+      <div id="queueInfo"></div>
+    </div>
+    <ul id="queueList"></ul>
+    <div class="settings">
+      <label class="field wide"><span>Save to</span>
+        <span class="folder"><input id="outDir" type="text" spellcheck="false"><button type="button" id="chooseBtn">Choose</button></span>
+      </label>
+      <label class="field"><span>Quality</span><select id="quality"></select></label>
+      <label class="field"><span>At the same time</span><select id="jobs"></select></label>
+      <label class="field wide" id="sourceField"><span>Original files from</span><select id="source">
+        <option value="download">Download service: faster, your edits</option>
+        <option value="stream">Streaming: exactly as uploaded</option>
+      </select><p class="source-help">Updated tags require Download Updated Metadata to be enabled in iBroadcast.
+        Existing files are preserved when you change source.</p></label>
+      <details class="wide">
+        <summary>Folder and file names</summary>
+        <input id="layout" type="text" spellcheck="false" aria-label="Folder and file names" style="margin-top:6px">
+        <p>Fields: {albumartist} {album} {year} {disc} {track} {disctrack} {title} {artist} {genre} {format}. A slash makes a folder.</p>
+      </details>
+      <details class="wide" id="workBox">
+        <summary>Work folder</summary>
+        <span class="folder" style="margin-top:6px"><input id="workDir" type="text" spellcheck="false" placeholder="Off: save directly" aria-label="Work folder"><button type="button" id="chooseWorkBtn">Choose</button></span>
+        <p>Optional. Tracks download to this folder on your computer first, and each finished track then moves to Save to. Useful when Save to is a NAS.</p>
+      </details>
+      <p id="premiumNote" class="premium-note wide" hidden>Free account: downloads are MP3 128 kbps. Original files need iBroadcast Premium.</p>
+      <details class="wide"><summary>Existing files</summary>
+        <label class="check"><input id="verifyFiles" type="checkbox"> Verify existing files with SHA-256</label>
+        <label class="check"><input id="adoptFiles" type="checkbox"> Adopt existing files I trust</label>
+        <p>Normally, size and modification time are checked. Changed or unknown files are preserved and skipped.
+        Adoption accepts matching-path files as local baselines; it does not verify their track or bitrate with iBroadcast.</p>
+      </details>
+    </div>
+    <button id="downloadBtn" class="primary" disabled>Download</button>
+
+    <section id="transfer" hidden aria-live="polite">
+      <div class="window">
+        <div class="window-top"><span id="lamp" class="lamp"></span><span id="tState">Downloading</span></div>
+        <div class="counter" id="counter"></div>
+        <div class="meter" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100" id="meter"><div class="fill" id="meterFill"></div></div>
+        <div class="window-stats" id="tStats"></div>
+        <div class="tally" id="tTally"></div>
+      </div>
+      <div class="row-gap" style="margin-top:10px">
+        <button id="stopBtn">Stop</button>
+        <button id="openBtn">Open folder</button>
+        <button id="retryBtn" hidden>Try again</button>
+      </div>
+      <ul class="active" id="tActive" style="margin-top:12px"></ul>
+      <ul class="recent" id="tRecent" style="margin-top:10px"></ul>
+      <details class="fails" id="tFails" hidden><summary></summary><ul></ul></details>
+      <details class="fails" id="tExisting" hidden><summary></summary><ul></ul></details>
+      <details class="fails" id="tNotes" hidden><summary></summary><ul></ul></details>
+    </section>
+  </aside>
+</main>
+
+<main id="bye" class="center" hidden>
+  <div class="bye"><strong>ibfetch has stopped</strong>You can close this tab. Run ibfetch again to come back.</div>
+</main>
+
+<div id="notice" role="status" hidden></div>
+
+<script>
+"use strict";
+const TOKEN = document.querySelector('meta[name="ibfetch-token"]').content;
+const $ = (id) => document.getElementById(id);
+const QUALITY = [["orig", "Original file"], ["320", "MP3 320 kbps"], ["256", "MP3 256 kbps"],
+                 ["192", "MP3 192 kbps"], ["128", "MP3 128 kbps"], ["96", "MP3 96 kbps"]];
+const LETTERS = ["All", "#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+
+let S = null, meta = null, metaVersion = 0, settingsApplied = false, misses = 0;
+let searchGeneration = 0, sessionVersion = null, metadataLoadingVersion = null, downloadStarting = false;
+let signingOut = false, activeInitial = null, sortColumn = null, sortDirection = 1;
+let updatePreferenceRevision = 0, updatePreferencePending = false;
+let results = [], checked = new Set(), lastClick = -1, letter = "All", activeArtist = null;
+const queue = new Map();
+const expanded = new Map();
+const themeMedia = matchMedia("(prefers-color-scheme: dark)");
+let themeSave = Promise.resolve();
+
+function showTheme() {
+  const root = document.documentElement;
+  const appearance = root.dataset.appearance, palette = root.dataset.palette;
+  root.dataset.theme = appearance === "dark" || (appearance === "auto" && themeMedia.matches) ? "dark" : "light";
+  $("appearanceChoice").value = appearance;
+  $("paletteChoice").value = palette;
+  $("themeBtn").textContent = `${{auto: "◐", light: "☀", dark: "☾"}[appearance]} Theme ▾`;
+  $("themeBtn").title = `${$("paletteChoice").options[$("paletteChoice").selectedIndex]?.text || palette} · ${appearance}`;
+}
+
+function setThemeMenu(open, restoreFocus = false) {
+  $("themeMenu").hidden = !open;
+  $("themeBtn").setAttribute("aria-expanded", String(open));
+  if (restoreFocus) $("themeBtn").focus();
+}
+
+function changeTheme() {
+  const root = document.documentElement;
+  root.dataset.appearance = $("appearanceChoice").value;
+  root.dataset.palette = $("paletteChoice").value;
+  showTheme();
+  const choice = {appearance: root.dataset.appearance, palette: root.dataset.palette};
+  // Serialize saves so a slow earlier request cannot overwrite the latest choice.
+  themeSave = themeSave.catch(() => {}).then(() => api("/api/appearance", choice))
+    .catch(e => notice(`Could not save the theme: ${e.message}`, true));
+  return themeSave;
+}
+
+async function api(path, body) {
+  const opt = { headers: { "X-Ibfetch-Token": TOKEN } };
+  if (body !== undefined) {
+    opt.method = "POST";
+    opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opt);
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* empty answer */ }
+  if (!res.ok) throw new Error(data.error || `ibfetch answered with HTTP ${res.status}.`);
+  return data;
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fold = (s) => String(s ?? "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+const num = (n) => Number(n || 0).toLocaleString();
+function clock(sec) {
+  sec = Math.round(sec || 0);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+}
+function span(sec) {
+  sec = Math.round(sec || 0);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
+  if (h) return `${num(h)} h ${m} min`;
+  if (m) return `${m} min`;
+  return `${sec} s`;
+}
+function size(b) {
+  b = b || 0;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+  return i ? `${b.toFixed(b < 10 ? 1 : 0)} ${units[i]}` : `${b} B`;
+}
+const base = (p) => String(p).split(/[\\/]/).pop();
+
+let noticeTimer = 0;
+function notice(text, bad = false) {
+  const el = $("notice");
+  el.textContent = text;
+  el.className = bad ? "bad" : "";
+  el.setAttribute("role", bad ? "alert" : "status");
+  el.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { el.hidden = true; }, bad ? 7000 : 4000);
+}
+
+/* polling: one loop, poll() just refreshes now */
+let stopped = false, statePollSerial = 0, loginRevision = 0;
+async function poll() {
+  if (stopped) return;
+  const updateRevision = updatePreferenceRevision;
+  const authRevision = loginRevision, serial = ++statePollSerial;
+  try {
+    const data = await api("/api/state");
+    if (stopped || serial !== statePollSerial || authRevision !== loginRevision) return;
+    if ((updatePreferencePending || updateRevision !== updatePreferenceRevision) && S?.updates && data.updates)
+      data.updates.automatic = S.updates.automatic;
+    S = data;
+    misses = 0;
+    render();
+    // Read the completed state first: closing a popup after approval must never undo sign-in.
+    if (!S.signed_in && S.login?.state === "waiting"
+        && signInFlow.popup?.closed) await cancelSignIn();
+  } catch (e) {
+    if (stopped || serial !== statePollSerial || authRevision !== loginRevision) return;
+    if (++misses >= 3) { stopped = true; showBye(); }
+  }
+}
+async function loop() {
+  await poll();
+  if (stopped) return;
+  const busy = S && ((S.transfer && ["ready", "planning", "running"].includes(S.transfer.state)) || S.login || S.library.state === "loading");
+  setTimeout(loop, busy ? 800 : 2500);
+}
+
+function showBye() {
+  ++signInFlow.serial; loginRevision++;
+  closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+  setThemeMenu(false);
+  setUpdatePanel(false);
+  for (const id of ["app", "signin"]) $(id).hidden = true;
+  $("bye").hidden = false;
+  document.querySelectorAll(".top button, #account, #libInfo").forEach((el) => { el.hidden = true; });
+}
+
+function resetLibraryView() {
+  searchGeneration++;
+  results = []; checked.clear(); expanded.clear(); queue.clear(); lastClick = -1;
+  meta = null; metaVersion = 0; metadataLoadingVersion = null;
+  letter = "All"; activeArtist = null; activeInitial = null;
+  for (const id of ["artistFind", "fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
+  $("fArtist").placeholder = "4hero or A*";
+  for (const [id, label] of [["fFormat", "Any format"], ["fTag", "Any tag"], ["fPlaylist", "Any playlist"]]) {
+    $(id).innerHTML = `<option value="">${label}</option>`; $(id).value = "";
+  }
+  $("fTag").disabled = $("fPlaylist").disabled = true;
+  for (const id of ["artistList", "letters", "genreList"]) $(id).innerHTML = "";
+  $("resultInfo").textContent = "";
+  renderQueue(); renderResultsEmpty();
+}
+
+function render() {
+  renderUpdates(S.updates);
+  if (sessionVersion !== S.session) {
+    sessionVersion = S.session;
+    resetLibraryView();
+  }
+  const signed = S.signed_in;
+  $("signin").hidden = signed;
+  $("app").hidden = !signed;
+  $("signoutBtn").hidden = !signed;
+  $("refreshBtn").hidden = !signed || S.library.state === "loading";
+  renderLogin();
+  const lib = S.library;
+  $("libInfo").textContent = !signed ? "" :
+    lib.state === "loading" ? "Loading your library index" :
+    lib.state === "error" ? "The library didn't load" :
+    lib.counts ? `${num(lib.counts.tracks)} tracks in ${num(lib.counts.albums)} albums` : "";
+  $("account").innerHTML = S.user ? `${esc(S.user.name || "Signed in")}<span class="badge">${S.user.premium ? "Premium" : "Free"}</span>` : "";
+  if (signed && lib.state === "ready" && lib.version !== metaVersion) loadMeta(lib.version);
+  if (signed && lib.state !== "ready" && !results.length) renderResultsEmpty();
+  if (!settingsApplied && S.settings) applySettings(S.settings);
+  if (S.user) {
+    const free = !S.user.premium;
+    $("premiumNote").hidden = !free;
+    for (const opt of $("quality").options) opt.disabled = free && opt.value !== "128";
+    if (free && $("quality").value !== "128") $("quality").value = "128";
+    updateSource();
+  }
+  renderTransfer();
+  updateDownloadButton();
+}
+
+let releaseData = null, displayedReleaseNotes = "";
+
+function refreshUpdateDialog() {
+  const data = releaseData;
+  if (!data) return;
+  $("updateDialogTitle").textContent = data.available ? `ibfetch ${data.latest} is available` : "ibfetch updates";
+  $("updateDialogVersion").textContent = `You are running ibfetch ${data.current}.`;
+  $("updateDialogName").textContent = data.name || "";
+  $("dialogRelease").href = updateURL(data);
+  const notes = typeof data.notes === "string" ? data.notes.slice(0,50000) : "";
+  if (notes !== displayedReleaseNotes) { $("releaseNotes").innerHTML = renderReleaseNotes(notes); displayedReleaseNotes = notes; }
+  $("releaseNotes").hidden = !notes;
+}
+function openUpdateDialog() {
+  if (!releaseData?.available) return;
+  setUpdatePanel(false); refreshUpdateDialog();
+  if (!$("updateDialog").open) $("updateDialog").showModal();
+  $("updateLater").focus();
+}
+function closeUpdateDialog() { $("updateDialog").close(); $("updateBtn").focus(); }
+const UPDATE_NOTES_LIMIT = 50000;
+
+function updateNotesURL(value) {
+  if (value.length > 8192 || /[\s\u0000-\u001f\u007f]/.test(value)) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
+}
+
+function updateNotesLinkEnd(text, start) {
+  let depth = 0;
+  for (let i = start; i < Math.min(text.length, start + 8193); i++) {
+    if (text[i] === "(") depth += 1;
+    if (text[i] === ")") { if (!depth) return i; depth -= 1; }
+  }
+  return -1;
+}
+
+function updateNotesInline(text, budget, depth = 0, links = true) {
+  const html = [], tokens = /`+|!\[|\[|https:\/\/|\*{1,2}|_{1,2}/g;
+  let copied = 0, match;
+  const append = (start, end, markup) => {
+    html.push(esc(text.slice(copied, start)), markup);
+    copied = end; tokens.lastIndex = end;
+  };
+  // A shared attempt budget also bounds unmatched delimiters and nested labels.
+  while (budget.inline > 0 && (match = tokens.exec(text))) {
+    budget.inline -= 1;
+    const marker = match[0], start = match.index, body = start + marker.length;
+    if (marker[0] === "`") {
+      const end = text.indexOf(marker, body);
+      if (end > body) append(start, end + marker.length, `<code>${esc(text.slice(body, end))}</code>`);
+    } else if (marker === "[" || marker === "![") {
+      const labelEnd = text.indexOf("](", body);
+      if (labelEnd < body) continue;
+      const end = updateNotesLinkEnd(text, labelEnd + 2);
+      if (end < 0) continue;
+      const label = text.slice(body, labelEnd), url = updateNotesURL(text.slice(labelEnd + 2, end));
+      const markup = marker === "[" && links && label && !label.includes("[") && url
+        ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${updateNotesInline(label, budget, depth + 1, false)}</a>`
+        : esc(text.slice(start, end + 1));
+      append(start, end + 1, markup);
+    } else if (marker === "https://") {
+      if (!links || start && !/[\s(]/.test(text[start - 1])) continue;
+      let end = body;
+      while (end < text.length && !/[\s<>"'`]/.test(text[end])) end += 1;
+      let value = text.slice(start, end).replace(/[.,;:!?]+$/, "");
+      let balance = 0;
+      for (const char of value) { if (char === "(") balance += 1; else if (char === ")") balance -= 1; }
+      while (balance < 0 && value.endsWith(")")) { value = value.slice(0, -1); balance += 1; }
+      const url = updateNotesURL(value);
+      if (url) append(start, start + value.length, `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(value)}</a>`);
+      else append(start, end, esc(text.slice(start, end)));
+    } else if (depth < 2 && /\S/.test(text[body] || "") && !(marker.length === 1 && /[\w*_]/.test(text[start - 1] || ""))) {
+      const end = text.indexOf(marker, body);
+      if (end > body && /\S/.test(text[end - 1]) && !(marker.length === 1 && /[\w*_]/.test(text[end + 1] || ""))) {
+        const tag = marker.length === 2 ? "strong" : "em";
+        append(start, end + marker.length, `<${tag}>${updateNotesInline(text.slice(body, end), budget, depth + 1, links)}</${tag}>`);
+      }
+    }
+  }
+  html.push(esc(text.slice(copied)));
+  return html.join("");
+}
+
+function updateNotesCells(line) {
+  return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+}
+
+function renderReleaseNotes(markdown) {
+  if (typeof markdown !== "string") return "";
+  const bounded = markdown.slice(0, UPDATE_NOTES_LIMIT);
+  if (!bounded.trim()) return "";
+  const lines = bounded.replace(/\r\n?/g, "\n").replace(/\u0000/g, "\ufffd").split("\n");
+  const html = [], budget = {inline: 1500, cells: 2000};
+  const inline = text => updateNotesInline(text, budget);
+  let paragraph = [], list = null;
+  const endParagraph = () => { if (paragraph.length) html.push(`<p>${inline(paragraph.join(" "))}</p>`); paragraph = []; };
+  const endList = () => {
+    if (list) html.push(`<${list.tag}>${list.items.map(item => `<li>${inline(item)}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+  const endBlocks = () => { endParagraph(); endList(); };
+  const tableLine = line => /^\s*\|.*\|\s*$/.test(line);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], fence = /^ {0,3}(`{3,}|~{3,})[^\n]*$/.exec(line);
+    if (fence) {
+      endBlocks();
+      const code = [], closing = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`);
+      for (i++; i < lines.length && !closing.test(lines[i]); i++) code.push(lines[i]);
+      html.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (!line.trim()) { endBlocks(); continue; }
+    const heading = /^ {0,3}(#{1,6})[ \t]+(.+)$/.exec(line);
+    if (heading) {
+      endBlocks();
+      const level = Math.min(6, heading[1].length + 2);
+      let label = heading[2].trimEnd(), end = label.length;
+      while (end && label[end - 1] === "#") end -= 1;
+      if (end && /\s/.test(label[end - 1])) label = label.slice(0, end).trimEnd();
+      html.push(`<h${level}>${inline(label)}</h${level}>`);
+      continue;
+    }
+    if (/^ {0,3}([-*_])(?:[ \t]*\1){2,}\s*$/.test(line)) { endBlocks(); html.push("<hr>"); continue; }
+    if (tableLine(line) && tableLine(lines[i + 1] || "")) {
+      const head = updateNotesCells(line), separator = updateNotesCells(lines[i + 1]);
+      if (head.length <= 20 && head.length <= budget.cells && head.length === separator.length && separator.every(cell => /^:?-{2,}:?$/.test(cell))) {
+        endBlocks();
+        const rows = []; budget.cells -= head.length;
+        for (i += 2; i < lines.length && tableLine(lines[i]); i++) {
+          const cells = updateNotesCells(lines[i]);
+          if (cells.length !== head.length || head.length > budget.cells) break;
+          budget.cells -= head.length; rows.push(cells);
+        }
+        i--;
+        html.push(`<table><thead><tr>${head.map(cell => `<th scope="col">${inline(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(cell => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+        continue;
+      }
+    }
+    const item = /^\s*(?:([-*+])|(\d{1,9})[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      endParagraph();
+      const tag = item[1] ? "ul" : "ol";
+      if (!list || list.tag !== tag) { endList(); list = {tag, items: []}; }
+      list.items.push(item[3]); continue;
+    }
+    if (list && /^\s+\S/.test(line)) { list.items[list.items.length - 1] += " " + line.trim(); continue; }
+    endList(); paragraph.push(line.trim());
+  }
+  endBlocks();
+  return html.join("\n");
+}
+
+
+function updateURL(data) {
+  return data?.available && /^[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$/.test(data.latest || "")
+    ? `https://github.com/cyberdeliaAI/ibfetch/releases/tag/v${data.latest}` : "https://github.com/cyberdeliaAI/ibfetch/releases/latest";
+}
+function renderUpdates(data) {
+  if (!data) return;
+  releaseData = data;
+  const available = data.available && updateURL(data).includes("/tag/");
+  $("currentVersion").textContent = data.current;
+  $("updateBtn").textContent = available ? `Update available · ${data.latest}` : `ibfetch ${data.current}`;
+  $("updateBtn").className = available ? "quiet available" : "quiet";
+  $("autoUpdates").checked = data.automatic;
+  $("checkUpdates").disabled = data.checking;
+  $("updateLink").href = updateURL(data);
+  $("updateLink").textContent = available ? `Download ${data.latest}` : "Releases & downloads";
+  $("updateStatus").textContent = data.checking ? "Checking for updates…" :
+    data.error ? (available ? `Last check failed. Last known update: ${data.latest}.` : "Could not check for updates. Try again or view GitHub releases.") :
+    available ? `Version ${data.latest} is available. You are running ${data.current}.` :
+    data.latest ? `You are running ${data.current}. Latest stable release: ${data.latest}.` :
+    data.automatic ? "Updates are checked automatically, at most once a day." : "Automatic checks are off. You can still check manually.";
+  $("updateDetails").hidden = !data.available;
+  if ($("updateDialog").open) refreshUpdateDialog();
+}
+function setUpdatePanel(open, focus = false) {
+  $("updatePanel").hidden = !open;
+  $("updateBtn").setAttribute("aria-expanded", String(open));
+  if (open) setThemeMenu(false);
+  if (focus) $("updateBtn").focus();
+}
+async function checkUpdates() {
+  $("checkUpdates").disabled = true;
+  try { const data = await api("/api/updates/check", {}); if (S) S.updates = data; renderUpdates(data); }
+  catch (error) {
+    notice("Could not check for updates. Try again later.", true);
+  }
+  finally { $("checkUpdates").disabled = !!S?.updates?.checking; }
+}
+async function saveUpdatePreference() {
+  const enabled = $("autoUpdates").checked;
+  const previous = S?.updates?.automatic;
+  updatePreferenceRevision++;
+  updatePreferencePending = true;
+  if (S?.updates) S.updates.automatic = enabled;
+  $("autoUpdates").disabled = true;
+  try {
+    const data = await api("/api/updates/settings", {automatic: enabled});
+    if (S) S.updates = data;
+    renderUpdates(data);
+  } catch (error) { if (S?.updates) S.updates.automatic = previous; renderUpdates(S?.updates); notice(error.message, true); }
+  finally { updatePreferencePending = false; updatePreferenceRevision++; $("autoUpdates").disabled = false; }
+}
+
+// The provider popup uses the device flow; tokens stay in the local Rust backend.
+const signInFlow = {serial: 0, requestId: "", popup: null, opening: false, message: ""};
+function signInVerificationUrl(login) {
+  for (const value of [login?.url, login?.plain_url]) {
+    if (typeof value !== "string" || value.length > 8192) continue;
+    try {
+      const url = new URL(value);
+      if (url.origin === "https://oauth.ibroadcast.com" && !url.username && !url.password) return url.href;
+    } catch { /* keep the manual code available for malformed provider links */ }
+  }
+  return "https://oauth.ibroadcast.com/device";
+}
+function reserveSignInPopup() {
+  try {
+    // Reserve before the asynchronous request so normal browser popup blockers allow it.
+    const popup = window.open("about:blank", "_blank", "popup,width=620,height=800,resizable=yes,scrollbars=yes");
+    if (popup) {
+      popup.opener = null;
+      popup.document.title = "Sign in to iBroadcast";
+      popup.document.body.textContent = "Opening iBroadcast sign-in…";
+    }
+    return popup;
+  } catch { return null; }
+}
+function closeSignInChild() {
+  try { signInFlow.popup?.close(); } catch { /* already closed */ }
+  signInFlow.popup = null;
+}
+function openSignInChild(login, serial, reserved = null) {
+  if (serial !== signInFlow.serial) { try { reserved?.close(); } catch {} return; }
+  signInFlow.requestId = login.request_id || "";
+  let opened = false;
+  signInFlow.popup = reserved;
+  try {
+    if (reserved && !reserved.closed) { reserved.location.replace(signInVerificationUrl(login)); opened = true; }
+  } catch { try { reserved?.close(); } catch {} signInFlow.popup = null; }
+  if (serial !== signInFlow.serial) return;
+  signInFlow.opening = false;
+  signInFlow.message = opened ? "Approve the connection in the iBroadcast sign-in window. ibfetch continues automatically."
+    : "The sign-in window could not be opened. Use your browser or the code below.";
+  $("signinFallback").open = !opened;
+  renderLogin();
+}
+async function beginSignIn() {
+  if (signingOut) return;
+  if (signInFlow.opening) return;
+  const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
+  closeSignInChild(); signInFlow.requestId = ""; signInFlow.popup = reserved;
+  signInFlow.opening = true; signInFlow.message = ""; loginRevision++;
+  if (S) S.login = null;
+  renderLogin();
+  try {
+    const {login} = await api("/api/login", {});
+    if (serial !== signInFlow.serial) {
+      try { reserved?.close(); } catch {}
+      if (login?.request_id) api("/api/login/cancel", {request_id: login.request_id}).catch(() => {});
+      return;
+    }
+    if (!login || login.state !== "waiting") { signInFlow.opening = false; closeSignInChild(); await poll(); return; }
+    if (S) S.login = login;
+    loginRevision++;
+    openSignInChild(login, serial, reserved);
+    poll();
+  } catch (error) {
+    try { reserved?.close(); } catch {}
+    if (serial !== signInFlow.serial) return;
+    signInFlow.opening = false; signInFlow.popup = null;
+    if (S) S.login = {state: "error", message: error.message};
+    loginRevision++; renderLogin();
+  }
+}
+function reopenSignIn() {
+  const login = S?.login;
+  if (login?.state !== "waiting" || signInFlow.opening) return;
+  if (signInFlow.popup && !signInFlow.popup.closed) {
+    try { signInFlow.popup.focus(); return; } catch { /* reopen below */ }
+  }
+  const reserved = reserveSignInPopup(), serial = ++signInFlow.serial;
+  signInFlow.opening = true;
+  openSignInChild(login, serial, reserved);
+}
+async function cancelSignIn() {
+  const id = signInFlow.requestId || S?.login?.request_id, serial = ++signInFlow.serial;
+  loginRevision++; closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+  try {
+    // A start still in flight cancels its own bound request when its reply arrives.
+    if (id) await api("/api/login/cancel", {request_id: id});
+    if (serial !== signInFlow.serial) return;
+    if (S) S.login = null;
+    loginRevision++; renderLogin(); poll();
+  } catch (error) { if (serial === signInFlow.serial) { renderLogin(); notice(error.message, true); } }
+}
+function renderLogin() {
+  const login = S?.login, waiting = login?.state === "waiting" && !S?.signed_in;
+  const starting = (signInFlow.opening || login?.state === "starting") && !S?.signed_in;
+  if (S?.signed_in || (!starting && !waiting)) {
+    closeSignInChild(); signInFlow.requestId = "";
+    if (S?.signed_in) { signInFlow.serial++; signInFlow.opening = false; }
+  }
+  $("signinIdle").hidden = !!(waiting || starting);
+  $("signinWait").hidden = !(waiting || starting);
+  $("signinBtn").disabled = !!starting || signingOut;
+  $("signinOpen").disabled = !!starting || signingOut;
+  $("signinFallback").hidden = !waiting;
+  $("signinError").hidden = login?.state !== "error";
+  if (login?.state === "error") $("signinError").textContent = login.message;
+  $("signinStatus").textContent = starting && !waiting ? "Contacting iBroadcast…" :
+    signInFlow.message || "Waiting for approval. Open the sign-in window, or use your browser below.";
+  if (waiting) {
+    $("signinCode").textContent = login.code || "";
+    $("signinLink").href = signInVerificationUrl(login);
+  }
+}
+async function signOut() {
+  if (signingOut || !confirm("Sign out? ibfetch forgets your sign-in and its copy of the library index.")) return;
+  signingOut = true;
+  try {
+    await api("/api/logout", {});
+    if (stopped) return;
+    loginRevision++; statePollSerial++;
+    ++signInFlow.serial; closeSignInChild(); signInFlow.requestId = ""; signInFlow.opening = false;
+    S = {...S, signed_in: false, session: null, user: null, login: null, transfer: null, can_retry: false,
+      library: {state: "none", version: 0, counts: null, error: ""}};
+    sessionVersion = null;
+    resetLibraryView(); render();
+  } catch (error) { notice(error.message, true); }
+  finally { signingOut = false; if (!stopped) { renderLogin(); poll(); } }
+}
+
+/* library index */
+async function loadMeta(version) {
+  if (metadataLoadingVersion === version) return;
+  metadataLoadingVersion = version;
+  const session = S.session;
+  let loaded;
+  try { loaded = await api("/api/meta"); } catch (e) {
+    if (session === S.session) notice(e.message, true);
+    return;
+  } finally {
+    if (metadataLoadingVersion === version) metadataLoadingVersion = null;
+  }
+  if (session !== S.session || version !== S.library.version || !S.signed_in) return;
+  meta = loaded;
+  metaVersion = version;
+  const fill = (id, label, items) => {
+    const sel = $(id), keep = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` + items.map((v) => `<option>${esc(v)}</option>`).join("");
+    if (items.includes(keep)) sel.value = keep;
+  };
+  fill("fFormat", "Any format", meta.formats);
+  fill("fTag", "Any tag", meta.tags);
+  fill("fPlaylist", "Any playlist", meta.playlists);
+  $("fTag").disabled = !meta.tags.length;
+  $("fPlaylist").disabled = !meta.playlists.length;
+  $("genreList").innerHTML = meta.genres.map((g) => `<option value="${esc(g)}">`).join("");
+  renderLetters();
+  renderArtists();
+  if (!results.length) renderResultsEmpty();
+}
+
+function letterOf(name) {
+  let f = fold(name);
+  if ($("fSkipThe").checked && f.startsWith("the ")) f = f.slice(4);
+  const c = f.charAt(0).toUpperCase();
+  return /^[A-Z]$/.test(c) ? c : "#";
+}
+
+function renderLetters() {
+  $("letters").innerHTML = LETTERS.map((l) =>
+    `<button type="button" class="${l === "All" ? "all" : ""}" data-letter="${l}" aria-pressed="${l === letter}">${l}</button>`).join("");
+}
+
+function renderArtists() {
+  if (!meta) return;
+  const q = fold($("artistFind").value);
+  let list = meta.artists;
+  if (q) list = list.filter((a) => fold(a[0]).includes(q));
+  else if (letter !== "All") list = list.filter((a) => letterOf(a[0]) === letter);
+  const cap = 500;
+  let html = "";
+  if (!q && letter !== "All" && list.length) {
+    const albums = list.reduce((n, a) => n + a[1], 0);
+    html += `<button type="button" class="artist every" data-initial="${letter}" aria-pressed="${activeInitial === letter}">` +
+            `<span class="name">Every artist on ${letter}</span><span class="count">${num(albums)}</span></button>`;
+  }
+  for (const [name, albums] of list.slice(0, cap)) {
+    html += `<button type="button" class="artist" data-name="${esc(name)}" aria-pressed="${activeArtist === name}">` +
+            `<span class="name">${esc(name)}</span><span class="count">${num(albums)}</span></button>`;
+  }
+  if (list.length > cap) html += `<p class="more">${num(list.length - cap)} more. Type a name to narrow it down.</p>`;
+  if (!list.length) html = `<p class="more">No artist matches.</p>`;
+  $("artistList").innerHTML = html;
+}
+
+/* searching */
+function filters() {
+  return {
+    artist: $("fArtist").value, artist_initial: activeInitial, album: $("fAlbum").value, track_artist: $("fTrackArtist").value,
+    year: $("fYear").value, genre: $("fGenre").value, format: $("fFormat").value, tag: $("fTag").value,
+    playlist: $("fPlaylist").value, skip_the: $("fSkipThe").checked,
+  };
+}
+
+async function search() {
+  const generation = ++searchGeneration;
+  const f = filters();
+  const any = ["artist_initial", "artist", "album", "track_artist", "year", "genre", "format", "tag", "playlist"].some((k) => String(f[k] || "").trim());
+  if (!any) { notice("Pick an artist or fill in a field first."); return; }
+  if (!S || S.library.state !== "ready") { notice("The library is still loading."); return; }
+  $("resultInfo").textContent = "Searching";
+  try {
+    const r = await api("/api/select", f);
+    if (generation !== searchGeneration) return;
+    results = r.albums;
+    orderResults();
+  } catch (e) {
+    if (generation !== searchGeneration) return;
+    results = [];
+    $("resultInfo").textContent = "";
+    notice(e.message, true);
+    renderResultsEmpty(e.message);
+    return;
+  }
+  checked = new Set(); lastClick = -1; expanded.clear();
+  renderResults();
+}
+
+function renderResultsEmpty(message) {
+  const loading = S && S.library.state === "loading";
+  const failed = S && S.library.state === "error";
+  $("results").innerHTML = `<div class="empty">` + (
+    loading ? `<strong>Loading your library index</strong>The first time takes a little while. After that ibfetch keeps a copy and only fetches it again when your library changes.` :
+    failed ? `<strong>The library didn't load</strong>${esc(S.library.error)} Use Refresh library to try again.` :
+    message ? `<strong>Nothing to show</strong>${esc(message)}` :
+    `<strong>Find the music you want</strong>Pick an artist on the left, or fill in a field above and press Search. Then add albums to the download list.`) + `</div>`;
+  $("addSelBtn").disabled = $("addAllBtn").disabled = true;
+}
+
+const RESULT_COLLATOR = new Intl.Collator(undefined, {numeric: true, sensitivity: "base"});
+const SORT_COLUMNS = [["artist", "Artist"], ["title", "Album"], ["year", "Year"],
+  ["tracks", "Tracks"], ["formats", "Format"], ["length", "Length"]];
+function orderResults() {
+  if (!sortColumn) return;
+  const compareText = (a, b) => RESULT_COLLATOR.compare(String(a || ""), String(b || ""));
+  results.sort((a, b) => {
+    const value = item => sortColumn === "tracks" ? item.tracks.length : item[sortColumn];
+    const primary = ["year", "tracks", "length"].includes(sortColumn)
+      ? (Number(value(a)) || 0) - (Number(value(b)) || 0) : compareText(value(a), value(b));
+    return primary * sortDirection || compareText(a.artist, b.artist) || compareText(a.title, b.title)
+      || (a.disc || 0) - (b.disc || 0) || a.id - b.id;
+  });
+}
+function sortResults(column) {
+  if (!SORT_COLUMNS.some(([key]) => key === column)) return;
+  sortDirection = sortColumn === column ? -sortDirection : 1;
+  sortColumn = column;
+  orderResults(); lastClick = -1; expanded.clear(); renderResults();
+  $("results").querySelector(`button[data-sort="${column}"]`)?.focus();
+}
+
+function renderResults() {
+  if (!results.length) {
+    renderResultsEmpty("No albums match. Check the spelling, or use * for any text, like *floyd*.");
+    $("resultInfo").textContent = "No albums";
+    return;
+  }
+  const head = `<div class="grid-row head" role="row"><div class="c-chk"><input type="checkbox" id="allBox" aria-label="Select all albums"></div>` +
+    SORT_COLUMNS.map(([key, label]) => `<div role="columnheader" aria-sort="${sortColumn === key ? (sortDirection === 1 ? "ascending" : "descending") : "none"}"${["year", "tracks", "length"].includes(key) ? ' class="num"' : ""}>` +
+      `<button type="button" class="sort" data-sort="${key}" title="Sort by ${label.toLowerCase()}">${label}${sortColumn === key ? (sortDirection === 1 ? " ↑" : " ↓") : ""}</button></div>`).join("") + `</div>`;
+  const rows = results.map((a, i) => rowHtml(a, i)).join("");
+  $("results").innerHTML = head + rows;
+  $("results").scrollTop = 0;
+  updateResultBar();
+}
+
+function rowHtml(a, i) {
+  const on = checked.has(a.id), inq = queue.has(a.id);
+  return `<div class="grid-row row${on ? " on" : ""}${inq ? " inq" : ""}" data-i="${i}" role="row">` +
+    `<div class="c-chk"><input type="checkbox" data-i="${i}" ${on ? "checked" : ""} aria-label="Select ${esc(a.title)}"></div>` +
+    `<div title="${esc(a.artist)}">${esc(a.artist)}</div>` +
+    `<div class="c-album" title="${esc(a.title)}"><button type="button" class="expand" data-i="${i}" aria-expanded="${expanded.has(a.id)}" aria-label="Show the tracks of ${esc(a.title)}">&#9656;</button>${esc(a.title)}` +
+    `${a.disc ? `<span class="disc">disc ${a.disc}</span>` : ""}</div>` +
+    `<div class="num">${a.year || ""}</div><div class="num">${a.tracks.length}</div><div>${esc(a.formats)}</div>` +
+    `<div class="num">${clock(a.length)}</div></div>`;
+}
+
+function refreshRow(i) {
+  const old = document.querySelector(`.row[data-i="${i}"]`);
+  if (!old) return;
+  const a = results[i];
+  old.className = `grid-row row${checked.has(a.id) ? " on" : ""}${queue.has(a.id) ? " inq" : ""}`;
+  old.querySelector("input").checked = checked.has(a.id);
+}
+
+function updateResultBar() {
+  const n = results.length;
+  const tracks = results.reduce((t, a) => t + a.tracks.length, 0);
+  const sel = results.filter((a) => checked.has(a.id));
+  $("resultInfo").textContent = sel.length
+    ? `${num(sel.length)} of ${num(n)} albums selected`
+    : `${num(n)} album${n === 1 ? "" : "s"}, ${num(tracks)} tracks, ${span(results.reduce((t, a) => t + a.length, 0))}`;
+  $("addSelBtn").disabled = !sel.length;
+  $("addSelBtn").textContent = sel.length ? `Add ${num(sel.length)} selected` : "Add selected";
+  $("addAllBtn").disabled = !n;
+  $("addAllBtn").textContent = n ? `Add all ${num(n)}` : "Add all";
+  const box = $("allBox");
+  if (box) {
+    box.checked = sel.length === n && n > 0;
+    box.indeterminate = sel.length > 0 && sel.length < n;
+  }
+}
+
+async function toggleTracks(i) {
+  const a = results[i];
+  const row = document.querySelector(`.row[data-i="${i}"]`);
+  const next = row.nextElementSibling;
+  if (expanded.has(a.id)) {
+    expanded.delete(a.id);
+    if (next && next.classList.contains("tracklist")) next.remove();
+    row.querySelector(".expand").setAttribute("aria-expanded", "false");
+    return;
+  }
+  expanded.set(a.id, true);
+  row.querySelector(".expand").setAttribute("aria-expanded", "true");
+  let tracks = [];
+  try { tracks = (await api("/api/album", { tracks: a.tracks })).tracks; } catch (e) { notice(e.message, true); return; }
+  if (!expanded.has(a.id)) return;
+  const box = document.createElement("div");
+  box.className = "tracklist";
+  box.innerHTML = `<ol>` + tracks.map((t) =>
+    `<li><span>${t.no || ""}</span><span><b>${esc(t.title)}</b>${t.artist && t.artist !== a.artist ? `<span class="ta">${esc(t.artist)}</span>` : ""}</span><span>${esc(t.format)}</span><span>${clock(t.length)}</span></li>`).join("") + `</ol>`;
+  row.after(box);
+}
+
+/* the download list */
+function addToQueue(albums) {
+  let added = 0, tracks = 0;
+  for (const a of albums) {
+    const have = queue.get(a.id);
+    if (have) {
+      const merged = new Set([...have.tracks, ...a.tracks]);
+      tracks += merged.size - have.tracks.length;
+      have.tracks = [...merged];
+      Object.assign(have.track_lengths, a.track_lengths);
+      have.length = have.tracks.reduce((n, id) => n + (have.track_lengths[id] || 0), 0);
+    } else {
+      queue.set(a.id, { id: a.id, artist: a.artist, title: a.title, year: a.year, disc: a.disc,
+                       tracks: [...a.tracks], track_lengths: {...a.track_lengths}, length: a.length });
+      added++; tracks += a.tracks.length;
+    }
+  }
+  checked.clear();
+  results.forEach((_, i) => refreshRow(i));
+  updateResultBar();
+  renderQueue();
+  notice(added ? `Added ${num(added)} album${added === 1 ? "" : "s"} with ${num(tracks)} tracks.` :
+         tracks ? `Added ${num(tracks)} more tracks.` : "Those albums are already in the list.");
+}
+
+function renderQueue() {
+  const items = [...queue.values()];
+  const tracks = items.reduce((n, a) => n + a.tracks.length, 0);
+  $("queueInfo").textContent = items.length
+    ? `${num(items.length)} album${items.length === 1 ? "" : "s"}, ${num(tracks)} tracks, ${span(items.reduce((n, a) => n + a.length, 0))}`
+    : "Empty. Add albums from the results.";
+  $("clearQueueBtn").hidden = !items.length;
+  const shown = items.slice(0, 400);
+  $("queueList").innerHTML = shown.map((a) =>
+    `<li><span><span class="q-album">${esc(a.title)}${a.disc ? ` <span class="disc">disc ${a.disc}</span>` : ""}</span>` +
+    `<span class="q-artist">${esc(a.artist)}${a.year ? `, ${a.year}` : ""}</span></span>` +
+    `<span class="q-n">${a.tracks.length}</span>` +
+    `<button type="button" class="q-x" data-id="${a.id}" aria-label="Remove ${esc(a.title)}" title="Remove">×</button></li>`).join("") +
+    (items.length > shown.length ? `<li><span class="q-artist">and ${num(items.length - shown.length)} more albums</span></li>` : "");
+  updateDownloadButton();
+}
+
+function queueTracks() {
+  let n = 0;
+  for (const a of queue.values()) n += a.tracks.length;
+  return n;
+}
+
+function updateDownloadButton() {
+  const n = queueTracks();
+  const running = downloadStarting || (S && S.transfer && ["ready", "planning", "running"].includes(S.transfer.state));
+  const btn = $("downloadBtn");
+  btn.disabled = !n || running || !S || S.library.state !== "ready";
+  btn.textContent = running ? "Downloading" : n ? `Download ${num(n)} track${n === 1 ? "" : "s"}` : "Download";
+}
+
+function applySettings(s) {
+  settingsApplied = true;
+  $("quality").innerHTML = QUALITY.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+  $("jobs").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}">${n} file${n === 1 ? "" : "s"}</option>`).join("");
+  $("outDir").value = s.out;
+  $("quality").value = s.quality;
+  $("jobs").value = String(s.jobs);
+  $("layout").value = s.layout;
+  $("workDir").value = s.work || "";
+  $("workBox").open = !!s.work;
+  $("source").value = s.source === "stream" ? "stream" : "download";
+  updateSource();
+}
+
+/* The download service only has original files; bitrates always stream. */
+function updateSource() {
+  $("sourceField").hidden = $("quality").value !== "orig";
+}
+
+async function startDownload() {
+  if (downloadStarting) return;
+  const n = queueTracks();
+  if (!n) return;
+  if (n > 1000 && !confirm(`Download ${num(n)} tracks?`)) return;
+  if ($("adoptFiles").checked && !confirm("Trust existing files at these paths as local baselines? This does not verify their track or bitrate with iBroadcast. Their audio will be preserved.")) return;
+  downloadStarting = true;
+  updateDownloadButton();
+  try {
+    await api("/api/download", {
+      items: [...queue.values()].map((a) => ({ album_id: a.id, tracks: a.tracks })),
+      out: $("outDir").value, quality: $("quality").value, jobs: Number($("jobs").value), layout: $("layout").value,
+      verify: $("verifyFiles").checked, adopt_existing: $("adoptFiles").checked, work: $("workDir").value,
+      source: $("source").value,
+    });
+  } catch (e) { notice(e.message, true); return; }
+  finally { downloadStarting = false; updateDownloadButton(); }
+  queue.clear();
+  renderQueue();
+  results.forEach((_, i) => refreshRow(i));
+  poll();
+}
+
+/* the transfer window */
+function renderTransfer() {
+  const t = S.transfer;
+  $("transfer").hidden = !t;
+  if (!t) return;
+  const running = ["ready", "planning", "running"].includes(t.state);
+  const w = String(t.total).length;
+  $("counter").innerHTML = `${String(t.done).padStart(w, "0")}<small> / ${t.total}</small>`;
+  const pct = t.total ? Math.round(t.done / t.total * 1000) / 10 : 0;
+  $("meterFill").style.width = `${pct}%`;
+  $("meter").setAttribute("aria-valuenow", String(pct));
+  $("lamp").className = `lamp${running ? " on" : t.state === "done" ? " done" : ""}`;
+  $("tState").textContent = t.state === "planning" || t.state === "ready" ? "Preparing download" : running ? "Downloading" : t.state === "done" ? "Finished" : "Stopped";
+  $("tStats").textContent = running
+    ? `${size(t.bytes)}${t.speed ? ` at ${size(t.speed)}/s` : ""}${t.eta ? `, about ${span(t.eta)} left` : ""}`
+    : t.state === "done" ? `Done in ${span(t.elapsed)}, ${size(t.bytes)} saved` : `Stopped after ${span(t.elapsed)}. Try again to carry on.`;
+  $("tTally").innerHTML = `<span><b>${num(t.ok)}</b> saved</span><span><b>${num(t.skip)}</b> skipped</span><span><b>${num(t.fail)}</b> failed</span>`;
+  $("stopBtn").hidden = !running;
+  $("retryBtn").hidden = running || !(t.fail || t.state === "stopped") || !S.can_retry;
+  $("retryBtn").textContent = t.state === "stopped" ? "Carry on" : "Retry failed";
+  $("tActive").innerHTML = running ? t.active.map((a) =>
+    `<li><span class="nm">${esc(base(a.name))}</span><div class="mini${a.expected ? "" : " busy"}"><i style="width:${a.expected ? Math.min(100, a.received / a.expected * 100) : 0}%"></i></div></li>`).join("") : "";
+  const label = { ok: "Saved", skip: "Skipped", fail: "Failed" };
+  $("tRecent").innerHTML = t.recent.slice(0, running ? 6 : 4).map((r) =>
+    `<li title="${esc(r.name)}${r.note ? `: ${esc(r.note)}` : ""}"><span class="st ${r.state === "fail" ? "fail" : ""}">${label[r.state]}</span>${esc(base(r.name))}</li>`).join("");
+  const fails = $("tFails");
+  fails.hidden = !t.failures.length;
+  if (t.failures.length) {
+    fails.querySelector("summary").textContent = `${num(t.fail)} failed, show which`;
+    fails.querySelector("ul").innerHTML = t.failures.map((f) => `<li>${esc(f.name)}: ${esc(f.note)}</li>`).join("");
+  }
+  const existing = $("tExisting"), notes = t.existing || [];
+  existing.hidden = !notes.length;
+  if (notes.length) {
+    existing.querySelector("summary").textContent = `${num(t.existing_count)} existing file${t.existing_count === 1 ? "" : "s"}: details`;
+    existing.querySelector("ul").innerHTML = notes.map(f => `<li>${esc(f.name)}: ${esc(f.note)}</li>`).join("");
+  }
+  const remarks = $("tNotes"), saved = t.notes || [];
+  remarks.hidden = !saved.length;
+  if (saved.length) {
+    remarks.querySelector("summary").textContent = `${num(t.notes_count)} saved with a note: details`;
+    remarks.querySelector("ul").innerHTML = saved.map(f => `<li>${esc(f.name)}: ${esc(f.note)}</li>`).join("");
+  }
+}
+
+/* events */
+$("updateBtn").addEventListener("click", () => {
+  if (releaseData?.available) openUpdateDialog();
+  else setUpdatePanel($("updatePanel").hidden);
+});
+$("updateDetails").addEventListener("click", openUpdateDialog);
+$("updateLater").addEventListener("click", closeUpdateDialog);
+$("updateSettings").addEventListener("click", event => {
+  event.stopPropagation();
+  closeUpdateDialog(); setUpdatePanel(true); $("checkUpdates").focus();
+});
+$("updateDialog").addEventListener("close", () => { if ($("updatePanel").hidden) $("updateBtn").focus(); });
+$("checkUpdates").addEventListener("click", checkUpdates);
+$("autoUpdates").addEventListener("change", saveUpdatePreference);
+$("themeBtn").addEventListener("click", () => setThemeMenu($("themeMenu").hidden));
+$("appearanceChoice").addEventListener("change", changeTheme);
+$("paletteChoice").addEventListener("change", changeTheme);
+document.addEventListener("click", e => {
+  if (!e.target.closest(".appearance")) setThemeMenu(false);
+  if (!e.target.closest(".update-wrap")) setUpdatePanel(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("themeMenu").hidden) { e.preventDefault(); setThemeMenu(false, true); }
+  if (e.key === "Escape" && !$("updatePanel").hidden) { e.preventDefault(); setUpdatePanel(false, true); }
+});
+if (themeMedia.addEventListener) themeMedia.addEventListener("change", showTheme);
+else themeMedia.addListener(showTheme);
+showTheme();
+if (typeof window !== "undefined") window.addEventListener("beforeunload", e => {
+  const busy = S && S.transfer && ["ready", "planning", "running"].includes(S.transfer.state);
+  if (!stopped && (queue.size || downloadStarting || busy)) {
+    e.preventDefault(); e.returnValue = "";
+  }
+});
+$("signinBtn").addEventListener("click", beginSignIn);
+$("signinOpen").addEventListener("click", reopenSignIn);
+$("signinCancel").addEventListener("click", cancelSignIn);
+$("signoutBtn").addEventListener("click", signOut);
+$("refreshBtn").addEventListener("click", async () => {
+  try { await api("/api/library", { refresh: true }); notice("Fetching the library index again."); poll(); } catch (e) { notice(e.message, true); }
+});
+$("quitBtn").addEventListener("click", async () => {
+  const running = S && S.transfer && ["ready", "planning", "running"].includes(S.transfer.state);
+  if (running && !confirm("A download is running. Stop it and quit? You can carry on later.")) return;
+  await api("/api/quit", {}).catch(() => {});
+  stopped = true;
+  showBye();
+});
+
+$("letters").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-letter]");
+  if (!b) return;
+  letter = b.dataset.letter;
+  $("artistFind").value = "";
+  renderLetters();
+  renderArtists();
+  $("artistList").scrollTop = 0;
+});
+$("artistFind").addEventListener("input", renderArtists);
+$("artistList").addEventListener("click", (e) => {
+  const b = e.target.closest("button.artist");
+  if (!b) return;
+  activeInitial = b.dataset.initial || null;
+  activeArtist = activeInitial ? null : b.dataset.name;
+  $("fArtist").value = activeArtist || "";
+  $("fArtist").placeholder = activeInitial ? `Every artist on ${activeInitial}` : "4hero or A*";
+  renderArtists();
+  search();
+});
+$("fArtist").addEventListener("input", () => {
+  activeInitial = null; $("fArtist").placeholder = "4hero or A*";
+});
+$("fSkipThe").addEventListener("change", renderArtists);
+$("filters").addEventListener("submit", (e) => { e.preventDefault(); activeArtist = $("fArtist").value; renderArtists(); search(); });
+$("clearBtn").addEventListener("click", () => {
+  searchGeneration++;
+  for (const id of ["fArtist", "fAlbum", "fTrackArtist", "fYear", "fGenre"]) $(id).value = "";
+  for (const id of ["fFormat", "fTag", "fPlaylist"]) $(id).value = "";
+  activeArtist = null; activeInitial = null; $("fArtist").placeholder = "4hero or A*";
+  results = []; checked.clear();
+  renderArtists();
+  renderResultsEmpty();
+  $("resultInfo").textContent = "";
+});
+
+$("results").addEventListener("click", (e) => {
+  const sort = e.target.closest("button[data-sort]");
+  if (sort) { sortResults(sort.dataset.sort); return; }
+  if (e.target.id === "allBox") {
+    const on = e.target.checked;
+    checked = on ? new Set(results.map((a) => a.id)) : new Set();
+    results.forEach((_, i) => refreshRow(i));
+    updateResultBar();
+    return;
+  }
+  const exp = e.target.closest(".expand");
+  if (exp) { toggleTracks(Number(exp.dataset.i)); return; }
+  const row = e.target.closest(".row[data-i]");
+  if (!row) return;
+  const i = Number(row.dataset.i);
+  const box = row.querySelector("input");
+  const on = e.target === box ? box.checked : !checked.has(results[i].id);
+  const [from, to] = e.shiftKey && lastClick >= 0 ? [Math.min(lastClick, i), Math.max(lastClick, i)] : [i, i];
+  for (let j = from; j <= to; j++) {
+    if (on) checked.add(results[j].id); else checked.delete(results[j].id);
+    refreshRow(j);
+  }
+  lastClick = i;
+  updateResultBar();
+});
+$("addSelBtn").addEventListener("click", () => addToQueue(results.filter((a) => checked.has(a.id))));
+$("addAllBtn").addEventListener("click", () => addToQueue(results));
+$("queueList").addEventListener("click", (e) => {
+  const b = e.target.closest(".q-x");
+  if (!b) return;
+  queue.delete(Number(b.dataset.id));
+  renderQueue();
+  const i = results.findIndex((a) => a.id === Number(b.dataset.id));
+  if (i >= 0) refreshRow(i);
+});
+$("clearQueueBtn").addEventListener("click", () => {
+  queue.clear();
+  renderQueue();
+  results.forEach((_, i) => refreshRow(i));
+});
+async function chooseFolderInto(input, button) {
+  notice("A folder window is open. It can sit behind your browser.");
+  $(button).disabled = true;
+  try {
+    const r = await api("/api/choose-folder", { start: $(input).value || $("outDir").value });
+    if (!r.available) notice("This system has no folder picker. Type the folder path instead.");
+    else if (r.path) { $(input).value = r.path; $("notice").hidden = true; }
+    else $("notice").hidden = true;
+  } catch (e) { notice(e.message, true); }
+  $(button).disabled = false;
+}
+$("chooseBtn").addEventListener("click", () => chooseFolderInto("outDir", "chooseBtn"));
+$("chooseWorkBtn").addEventListener("click", () => chooseFolderInto("workDir", "chooseWorkBtn"));
+$("quality").addEventListener("change", updateSource);
+$("downloadBtn").addEventListener("click", startDownload);
+$("stopBtn").addEventListener("click", async () => { await api("/api/cancel", {}).catch((e) => notice(e.message, true)); poll(); });
+$("openBtn").addEventListener("click", async () => {
+  try { await api("/api/open-folder", { path: S.transfer ? S.transfer.out : $("outDir").value }); } catch (e) { notice(e.message, true); }
+});
+$("retryBtn").addEventListener("click", async () => {
+  try { await api("/api/retry", {}); poll(); } catch (e) { notice(e.message, true); }
+});
+
+renderQueue();
+loop();
+</script>
+</body>
+</html>

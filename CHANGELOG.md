@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0 (unreleased)
+
+- Move the native desktop app, browser UI and CLI to a shared Rust executable. The desktop window uses egui.
+- Use the existing ibfetch profile and OAuth registration. The app checks the official ibfetch release feed and opens release downloads for manual installation.
+- Measure recent download speed across retries, including retransmitted audio when a streaming server ignores a resume request.
+
 ## 1.7.1
 
 - Keep manual release checks and the automatic-check opt-out accessible from an available-update dialog on every platform.

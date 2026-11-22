@@ -29,3 +29,10 @@ iBroadcast/
 /.local-history/
 /.build-venv
 /electron/node_modules
+
+# Native Rust builds and signing files
+/target/
+/rust-artifacts/
+*.p12
+*.key
+desktop-window.ron

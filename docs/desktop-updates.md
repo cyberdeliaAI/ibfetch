@@ -1,5 +1,7 @@
 # Desktop updates
 
+This page covers the 1.7.1 Python/Electron release. For the native 1.8.0 development version, see the [usage guide](usage.md).
+
 ## User flow
 
 The header shows the running version and **Update available** when a newer stable
