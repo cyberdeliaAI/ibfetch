@@ -62,7 +62,7 @@ app shows the device code and waits for approval. Use **Switch User** on the
 iBroadcast page when changing the browser's remembered account. The native
 version shows release notes and links to downloads. Install new versions
 manually. The update check reads stable releases from the official ibfetch repository.
-Get the platform downloads and checksums from the [1.8.0 release](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.0).
+Get the platform downloads and checksums from the [1.8.1 release](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.1).
 
 The fixture suite checks path selection, both download routes, existing data,
 work-folder moves, browser authorization and account isolation with disposable
