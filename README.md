@@ -85,6 +85,16 @@ The native ibfetch 1.8.1 app on macOS.
 
 ![Open Theme menu with Auto selected and all five colour palettes visible](docs/screenshots/ibfetch-theme-menu.png)
 
+## A Note on AI Usage
+
+I use AI to help debug ibfetch, review code, explore technical options, and
+occasionally write code. I review the suggestions I use, test the code, and
+refine it before including it in the project.
+
+I set the direction for ibfetch, design its architecture and interface, and make
+the final technical decisions. I’m responsible for the quality and reliability
+of every version I release.
+
 ## License
 
 ibfetch is an independent app by Cyberdelia. Its source is under the
