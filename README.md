@@ -4,16 +4,16 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/ibroadcast-dark-compact-powered.svg"><img src="assets/ibroadcast-light-compact-powered.svg" width="220" alt="Powered by iBroadcast"></picture><br><sub>Independent app by Cyberdelia</sub></p>
 <p align="center"><a href="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml"><img src="https://github.com/cyberdeliaAI/ibfetch/actions/workflows/tests.yml/badge.svg" alt="Tests"></a> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2e7d4f" alt="MIT license"></a></p>
 
-**[Download ibfetch 1.8.1](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.1).**
+**[Download ibfetch 1.8.2](https://github.com/cyberdeliaAI/ibfetch/releases/tag/v1.8.2).**
 One Rust executable provides a native desktop app, a local browser interface and
 the command line.
 
 | Platform | Download | After extracting |
 | --- | --- | --- |
-| macOS 13+, Apple Silicon | [Mac ARM64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.1/ibfetch-1.8.1-macos-arm64.zip) | Move `ibfetch.app` to Applications |
-| macOS 13+, Intel | [Mac x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.1/ibfetch-1.8.1-macos-x64.zip) | Move `ibfetch.app` to Applications |
-| Windows x64 | [Windows ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.1/ibfetch-1.8.1-windows-x64.zip) | Open `ibfetch.exe` |
-| Linux x64 | [Linux tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.1/ibfetch-1.8.1-linux-x64.tar.gz) | Run `./ibfetch` |
+| macOS 13+, Apple Silicon | [Mac ARM64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.2/ibfetch-1.8.2-macos-arm64.zip) | Move `ibfetch.app` to Applications |
+| macOS 13+, Intel | [Mac x64 ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.2/ibfetch-1.8.2-macos-x64.zip) | Move `ibfetch.app` to Applications |
+| Windows x64 | [Windows ZIP](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.2/ibfetch-1.8.2-windows-x64.zip) | Open `ibfetch.exe` |
+| Linux x64 | [Linux tar.gz](https://github.com/cyberdeliaAI/ibfetch/releases/download/v1.8.2/ibfetch-1.8.2-linux-x64.tar.gz) | Run `./ibfetch` |
 
 Both Mac downloads are Developer ID signed and notarized by Apple. The Windows
 executable is unsigned. For the browser app, run `ibfetch gui`. Use
@@ -44,7 +44,7 @@ an existing installation, quit the app, run `brew update` and use
   Existing audio is preserved. An interrupted streaming download can resume when
   the saved range information still matches.
 
-## Build and run 1.8.1
+## Build and run 1.8.2
 
 Use stable Rust 1.95 or newer. The default command opens the native desktop app.
 
@@ -65,7 +65,7 @@ See the [usage guide](docs/usage.md) for settings and downloads and the
 Quit the older app before using the same profile or download folder. ibfetch
 keeps your settings and download manifests. Existing sessions can continue using
 their original registration. To authorize ibfetch under its own name, sign out
-and sign in again with 1.8.1.
+and sign in again with 1.8.1 or later.
 
 To try it separately, select a fresh profile and output
 folder. Launch the desktop app with the following command, sign in, then choose

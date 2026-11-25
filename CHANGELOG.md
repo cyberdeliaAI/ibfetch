@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.2
+
+- Stop the download queue when iBroadcast reports that its download bandwidth limit has been reached, including after a sign-in token refresh. Start a new download manually once bandwidth is available again.
+
 ## 1.8.1
 
 - Use ibfetch's own iBroadcast registration for new sign-ins. Existing sessions continue to refresh with their original client ID.
