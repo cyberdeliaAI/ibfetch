@@ -725,14 +725,11 @@ impl Account {
         if !is_json(&response) {
             return Ok(response);
         }
-        let body = self.http().body(stop, response, 16 * 1024)?;
-        if serde_json::from_slice::<Value>(&body).is_ok_and(|v| v["authenticated"] == false) {
+        if self.download_auth_rejected(response, stop)? {
             let token = self.refresh(&self.current()?, stop)?;
             let response = self.http().send(stop, request(&token.access_token)?)?;
             if is_json(&response) {
-                let body = self.http().body(stop, response, 16 * 1024)?;
-                if serde_json::from_slice::<Value>(&body).is_ok_and(|v| v["authenticated"] == false)
-                {
+                if self.download_auth_rejected(response, stop)? {
                     return Err(
                         Fatal("iBroadcast rejected the session. Sign in again.".into()).into(),
                     );
@@ -742,6 +739,20 @@ impl Account {
             return Ok(response);
         }
         bail!("iBroadcast refused the original file (HTTP {code}).")
+    }
+    fn download_auth_rejected(&self, response: Response, stop: &CancellationToken) -> Result<bool> {
+        let status = response.status();
+        let body = self.http().body(stop, response, 16 * 1024)?;
+        let Ok(reply) = serde_json::from_slice::<Value>(&body) else {
+            return Ok(false);
+        };
+        if status == StatusCode::OK && reply["bandwidth_limit"] == true {
+            return Err(Fatal(
+                "iBroadcast's download bandwidth limit has been reached. Try again later.".into(),
+            )
+            .into());
+        }
+        Ok(reply["authenticated"] == false)
     }
     pub fn stream(
         &self,
