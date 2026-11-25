@@ -932,6 +932,12 @@ impl Desktop {
                                 let opened = browser::open_url(url);
                                 self.result(opened);
                             }
+                            if ui.button("Copy sign-in link").clicked()
+                                && let Some(url) = self.view.login["url"].as_str()
+                            {
+                                ui.ctx().copy_text(url.to_owned());
+                                self.notice("Paste the link into your browser to sign in.", false);
+                            }
                             if ui.button("Copy code").clicked() {
                                 ui.ctx().copy_text(code.clone());
                                 self.notice("Code copied.", false);

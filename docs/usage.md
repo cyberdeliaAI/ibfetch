@@ -58,7 +58,9 @@ filesystems. A server share that supports neither operation fails safely. Valida
 this on supported macOS, Windows and Linux mounts before using it for a large run.
 
 Desktop sign-in opens the official iBroadcast page in the system browser. The
-app shows the device code and waits for approval. Use **Switch User** on the
+app shows the device code and waits for approval. If the browser stays closed,
+open [the iBroadcast device page](https://oauth.ibroadcast.com/device) manually
+and enter the code shown in the app. Use **Switch User** on the
 iBroadcast page when changing the browser's remembered account. The native
 version shows release notes and links to downloads. Install new versions
 manually. The update check reads stable releases from the official ibfetch repository.

@@ -30,8 +30,67 @@ pub fn open_url(url: &str) -> Result<()> {
         url.starts_with("https://") || url.starts_with("http://127.0.0.1:"),
         "Invalid browser link."
     );
+    #[cfg(windows)]
+    {
+        windows_open_link(url)
+    }
+    #[cfg(not(windows))]
     open_external(url.as_ref())
 }
+
+#[cfg(windows)]
+fn windows_open_link(url: &str) -> Result<()> {
+    use windows_sys::Win32::{
+        Foundation::RPC_E_CHANGED_MODE,
+        System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+        UI::{
+            Shell::{SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW},
+            WindowsAndMessaging::SW_SHOWNORMAL,
+        },
+    };
+
+    ensure!(!url.contains('\0'), "Invalid browser link.");
+    let target: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+    let mut request = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+        lpVerb: windows_sys::core::w!("open"),
+        lpFile: target.as_ptr(),
+        nShow: SW_SHOWNORMAL,
+        ..Default::default()
+    };
+    // The shell can delegate to a COM protocol handler. Respect an apartment
+    // already established by the desktop UI and balance only our own init.
+    let hr = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+    ensure!(
+        hr >= 0 || hr == RPC_E_CHANGED_MODE,
+        "Could not initialize the Windows browser launcher."
+    );
+    // target remains alive until Windows has finished handing off the URL.
+    let launched = unsafe { ShellExecuteExW(&mut request) } != 0;
+    let error = (!launched).then(std::io::Error::last_os_error);
+    if hr >= 0 {
+        unsafe { CoUninitialize() };
+    }
+    if let Some(error) = error {
+        bail!("Windows could not open the default browser ({error}).");
+    }
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn windows_reports_failed_shell_dispatch() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("nonexistent.exe");
+    assert!(
+        windows_open_link(missing.to_str().unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("Windows could not open")
+    );
+}
+
 pub fn open_folder(path: &Path) -> Result<()> {
     let folder = storage::canonical(&storage::expand(path)?)?;
     ensure!(folder.is_dir(), "That folder does not exist.");
