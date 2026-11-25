@@ -469,6 +469,76 @@ fn stream_counts_both_responses_when_the_server_ignores_the_resume_range() {
 }
 
 #[test]
+fn explicit_bandwidth_limit_stops_before_stream_fallback_or_the_next_track() {
+    for refresh_first in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        store_tokens(temp.path());
+        let server = Mock::start(move |path, _, body| match path {
+            "/oauth/token" => json_response(json!({"access_token": "renewed-fixture"})),
+            "/download" if refresh_first && body.contains("_token=example-access") => {
+                json_response(json!({"authenticated": false}))
+            }
+            "/download" => {
+                json_response(json!({"bandwidth_limit": true, "message": "private detail"}))
+            }
+            _ => media(b"original audio fixture".to_vec()),
+        });
+        let account = server.provider(temp.path()).load().unwrap().unwrap();
+        let lib = lib("one");
+        let jobs = [plan(&lib, 101, "orig"), plan(&lib, 102, "orig")];
+        let mut opts = tests_options(&temp, Source::Download);
+        opts.workers = 1;
+        let stop = CancellationToken::new();
+        let result = downloads::run(&account, &lib, &jobs, opts.clone(), &stop, |_| {}).unwrap();
+        assert_eq!((result.saved, result.failed, result.stopped), (0, 1, 1));
+        let reason = result.fatal.unwrap();
+        assert!(reason.contains("bandwidth limit"));
+        assert!(!reason.contains("private detail"));
+        assert_eq!(
+            request_count(&server.seen, "/download"),
+            1 + usize::from(refresh_first)
+        );
+        assert_eq!(
+            request_count(&server.seen, "/oauth/token"),
+            usize::from(refresh_first)
+        );
+        assert_eq!(request_count(&server.seen, "/stream"), 0);
+        assert!(
+            jobs.iter()
+                .all(|job| !opts.out.join(&job.relative).exists())
+        );
+    }
+}
+
+#[test]
+fn non_boolean_or_false_bandwidth_limit_allows_normal_fallback() {
+    for flag in [json!(false), json!("true")] {
+        let temp = tempfile::tempdir().unwrap();
+        store_tokens(temp.path());
+        let server = Mock::start(move |path, _, _| {
+            if path == "/download" {
+                return json_response(json!({"bandwidth_limit": flag}));
+            }
+            media(b"original audio fixture".to_vec())
+        });
+        let account = server.provider(temp.path()).load().unwrap().unwrap();
+        let lib = lib("one");
+        let result = downloads::transfer(
+            &account,
+            &lib,
+            &plan(&lib, 101, "orig"),
+            &tests_options(&temp, Source::Download),
+            &CancellationToken::new(),
+            &|_| {},
+        )
+        .unwrap();
+        assert_eq!(result.state, State::Saved);
+        assert!(result.note.contains("Fallback:"));
+        assert_eq!(request_count(&server.seen, "/stream"), 1);
+    }
+}
+
+#[test]
 fn fallback_keeps_provenance_and_does_not_replace_existing_audio() {
     let temp = tempfile::tempdir().unwrap();
     store_tokens(temp.path());

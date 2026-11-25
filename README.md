@@ -34,7 +34,9 @@ an existing installation, quit the app, run `brew update` and use
 - Browse and sort your music by album, artist, genre, year, format, tags or playlists.
 - Download original files through iBroadcast's download service, or stream the
   uploaded file as-is. If the download service fails, ibfetch can fall back
-  to streaming and records which tracks used the fallback.
+  to streaming and records which tracks used the fallback. If iBroadcast reports
+  a download bandwidth limit, ibfetch stops the queue. Start a new download
+  manually once bandwidth is available again.
 - iBroadcast's **Download Updated Metadata** setting controls whether the download
   service embeds edits made on iBroadcast. Original files and MP3 rates other
   than 128 kbps require iBroadcast Premium.
