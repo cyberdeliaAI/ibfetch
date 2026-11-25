@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.3
+
+- Open sign-in links with the registered Windows browser and report a launch failure.
+- Add **Copy sign-in link** to the desktop sign-in screen so you can open the approval page manually.
+
 ## 1.8.2
 
 - Stop the download queue when iBroadcast reports that its download bandwidth limit has been reached, including after a sign-in token refresh. Start a new download manually once bandwidth is available again.
