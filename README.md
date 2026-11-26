@@ -77,15 +77,13 @@ cargo run --locked -- --home ~/ibfetch-test-profile
 
 ## Screenshots
 
-The native ibfetch 1.8.1 app on macOS.
+**Browse albums by artist.** The ibfetch 1.8.3 desktop app on macOS shows 41 albums by Bert Kaempfert and His Orchestra, with track counts, formats and playing times.
 
-**Browsing and downloading.** The Amber palette shows six albums by Astrud Gilberto and the progress of a 12-track download.
+![Bert Kaempfert and His Orchestra selected in the artist list, with album results in the centre and download settings on the right](docs/screenshots/ibfetch-library.png)
 
-![Album search results for Astrud Gilberto with progress bars for three FLAC files](docs/screenshots/ibfetch-amber-download.png)
+**Check for updates.** Click the version number to compare your installed version with the latest release, turn automatic checks on or off, or open the downloads page.
 
-**Choosing a theme.** The Theme menu shows the iBroadcast inspired palette with appearance set to follow the system.
-
-![Open Theme menu with Auto selected and all five colour palettes visible](docs/screenshots/ibfetch-theme-menu.png)
+![Update panel showing 1.8.3 as both the installed and latest version, with automatic checks enabled](docs/screenshots/ibfetch-updates.png)
 
 ## A Note on AI Usage
 
